@@ -1,4 +1,3 @@
-Here's a well-structured **GitHub README** for your **ROS 2 Ten Months Challenge** project:  
 
 ---
 
