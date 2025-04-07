@@ -65,7 +65,7 @@ ros2 topic echo /your_topic_name
 #### **📌 Terminal 4: Visualizing the ROS Graph**  
 Run **rqt_graph** to visualize node connections:  
 ```bash
-ros2 run rqt_graph rqt_graph
+rgt_graph
 ```
 
 ---
