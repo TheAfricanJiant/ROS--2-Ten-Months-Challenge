@@ -75,3 +75,7 @@ rgt_graph
 - If the robot doesn’t move, check if `teleop_to_motor` is running and echo the topic.  
 
 ---
+
+Demo on  
+[![Watch the video](https://www.youtube.com/watch?v=8mwOU-UvqDQ)](https://www.youtube.com/watch?v=8mwOU-UvqDQ)
+
