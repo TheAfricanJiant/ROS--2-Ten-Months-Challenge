@@ -8,6 +8,7 @@ This repository contains robotics projects and resources focused on **ROS 2** th
 
 ---
 
+![alt text](image/ApplicationFrameHost_HjGZkIjTLb.png)
 ## 📌 **Project 1: Teleoperation with micro-ROS**  
 
 ### **📜 Prerequisites**  
