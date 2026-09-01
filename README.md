@@ -77,5 +77,5 @@ rgt_graph
 ---
 
 Demo on  
-[![Watch the video](https://www.youtube.com/watch?v=8mwOU-UvqDQ)](https://www.youtube.com/watch?v=8mwOU-UvqDQ)
+[![Watch the video](https://img.youtube.com/vi/8mwOU-UvqDQ/hqdefault.jpg)](https://www.youtube.com/watch?v=8mwOU-UvqDQ)
 
