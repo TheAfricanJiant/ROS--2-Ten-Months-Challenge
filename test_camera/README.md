@@ -110,6 +110,7 @@ stream on `\n` is enough framing — no brace-matching across a 60 kB payload.
 test_camera/
 ├── stream_camera.py     # CLI entry point
 ├── diagnose.py          # which firmware is a board actually running?
+├── flash_firmware.py    # reflash over the bootloader's X-Modem receiver
 └── sscma/
     ├── protocol.py      # framing + JSON reply parsing
     ├── client.py        # serial transport, AT commands, frame decoding
@@ -156,30 +157,67 @@ is `slot flash_offset`:
 
 A board booting slot `0x00000000` is running **Himax factory test firmware**,
 which contains no camera application at all — hence no frames, ever, with any
-camera. The bootloader itself is healthy (it verifies and jumps), so the board
-is fully recoverable by reflashing.
+camera. The bootloader itself is healthy (it verifies images and jumps), so the
+board is fully recoverable.
 
-**To reflash:** connect the board alone, open
-[SenseCraft AI](https://sensecraft.seeed.cc/ai/#/model) in Chrome or Edge,
-choose *Grove Vision AI V2*, and flash a model — this rewrites the application
-slot and restores sscma-micro. Then confirm:
+**SenseCraft cannot fix this.** Its connect flow first waits for an SSCMA
+handshake, which is exactly the firmware that is missing, so it just times out
+and reports that it refuses to connect. Reflash over the bootloader instead.
 
-```powershell
-python diagnose.py COM3      # expect: HEALTHY
-python stream_camera.py --port COM3 --info
-```
+### Reflashing
 
-Web Serial needs Chrome or Edge, and nothing else may be holding the port —
-close this tool first.
+1. **Free the port.** A SenseCraft tab in Chrome holds the COM port open even
+   when it failed to connect, and blocks every other tool with
+   `PermissionError(13, 'Access is denied')`. Close it.
+2. **Download the firmware** matching your working board's version from the
+   [official releases](https://github.com/Seeed-Studio/sscma-example-we2/releases)
+   — e.g. `grove_vision_ai_v2_20250102.img` for firmware `2025.01.02`. Check
+   which version you want with `python stream_camera.py --info` on a healthy
+   board, so both modules end up identical.
+3. **Dry run first** — enters the bootloader and confirms the X-Modem receiver
+   answers, without writing anything:
+
+   ```powershell
+   python flash_firmware.py --image grove_vision_ai_v2_20250102.img --port COM3 --dry-run
+   ```
+
+   Expect `Set X-modem flag = Yes` and `receiver is ready ('C' handshake seen)`.
+   If it cannot get there, hold the **BOOT** button while plugging the USB-C
+   cable in, release it, and try again.
+
+4. **Flash** (same command without `--dry-run`). Roughly 18 s for a 630 kB
+   image at 921600 baud. Do not unplug the board.
+
+   ```powershell
+   python flash_firmware.py --image grove_vision_ai_v2_20250102.img --port COM3
+   ```
+
+5. **Verify:**
+
+   ```powershell
+   python diagnose.py COM3               # expect: HEALTHY
+   python stream_camera.py --port COM3 --info
+   ```
+
+`flash_firmware.py` only ever writes the application slot — the bootloader is
+untouched, so an interrupted transfer leaves the board exactly as recoverable
+as it was. Retry it.
+
+The image must carry the Himax `ckBS` header and be at most 1 MB; the script
+checks both before it opens the port.
 
 ---
 
 ## Verification status
 
-**Verified against real hardware** — a Grove Vision AI V2 (`id=a4ea3fe8`,
-firmware `2025.01.02`) on Windows: identity, sensor enumeration, model-slot
-reporting, resolution switching (240×240 and 640×480), and continuous frame
-decoding.
+**Verified against real hardware** — two Grove Vision AI V2 modules on
+Windows (`id=a4ea3fe8` and `id=ae83564f`, both firmware `2025.01.02`):
+identity, sensor enumeration, model-slot reporting, resolution switching
+(240×240 and 640×480), and continuous frame decoding.
+
+`flash_firmware.py` has been used successfully end to end: a board stuck on
+Himax factory firmware (booting slot `0x00000000`) was recovered to
+sscma-micro (slot `0x00100000`) and now streams frames normally.
 
 Also covered by a fake-device harness: reply framing including byte-at-a-time
 arrival, junk tolerance, JPEG decoding, centre→corner box conversion,
