@@ -1,0 +1,28 @@
+# Local-only working files
+rules.md
+
+# ROS 2 / colcon
+build/
+install/
+log/
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Calibration / capture output (usually large, regenerate locally)
+projects/*/calibration/*.yaml
+projects/*/calibration/captures/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

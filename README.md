@@ -1,82 +1,88 @@
+# 🤖 ROS 2 Ten Months Challenge
+
+A long-term ROS 2 robotics challenge documenting my progression from ROS 2 fundamentals and micro-ROS to AI perception, stereo vision, SLAM, and autonomous robotics using the XRP platform.
+
+This repository is a **collection of practical ROS 2 projects**. Each project lives in its own folder under [`projects/`](projects/) with its own README, firmware, and ROS 2 workspace, so it can be read, built, and run independently.
 
 ---
 
-## 🚀 **ROS 2 Ten Months Challenge**  
-📅 **March 15 – December 15, 2025**  
+## 📚 Projects
 
-This repository contains robotics projects and resources focused on **ROS 2** throughout a **ten-month journey**.  
-
----
-
-![alt text](image/ApplicationFrameHost_HjGZkIjTLb.png)
-## 📌 **Project 1: Teleoperation with micro-ROS**  
-
-### **📜 Prerequisites**  
-Ensure you have the following installed before proceeding:  
-- ROS 2 (Jazzy)  
-- **micro-ROS Agent** package (Install following [this guide](https://micro.ros.org/docs/tutorials/core/first_application_linux/))  
-  - ⚠️ **Skip** "Building the firmware" and "Creating the micro-ROS agent"  
+| # | Project | What it covers | Status |
+|---|---------|----------------|--------|
+| 01 | [Teleoperation with micro-ROS](projects/01_teleop_microros/README.md) | ROS 2 ↔ micro-ROS over UDP, `teleop_twist_keyboard`, custom node driving an ESP32 motor controller | ✅ Done |
+| 02 | [Stereo AI Perception Robot (XRP)](projects/02_stereo_ai_perception_xrp/README.md) | Dual night-vision cameras, Grove AI V2 object detection, stereo depth, ROS 2 perception topics, micro-ROS → Pico → XRP, path to SLAM | 🚧 In progress |
 
 ---
 
-### **🛠️ Setup & Running the Project**  
+## 🗂️ Repository layout
 
-#### **1️⃣ Flash the ESP Board with micro-ROS**  
-Upload the **micro-ROS PlatformIO** code onto your ESP board.  
-
-#### **2️⃣ Start the micro-ROS Agent**  
-Run the micro-ROS agent to establish communication between the ESP board and ROS 2:  
-```bash
-ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
-```  
-🕐 **Wait** for the ESP board to connect. It will show:  
 ```
-Subscriber created
+.
+├── projects/                     # One folder per project, each self-contained
+│   ├── 01_teleop_microros/
+│   │   ├── README.md
+│   │   ├── firmware/             # PlatformIO micro-ROS firmware (ESP32)
+│   │   └── ros2_ws/src/          # ROS 2 packages
+│   └── 02_stereo_ai_perception_xrp/
+│       ├── README.md
+│       ├── firmware/             # micro-ROS firmware (RP2040 / Pico on XRP)
+│       ├── ros2_ws/src/          # ROS 2 perception & control packages
+│       ├── calibration/          # Camera intrinsics / stereo extrinsics
+│       ├── scripts/              # Standalone test & bring-up scripts
+│       └── docs/                 # Wiring, notes, measurements
+├── docs/resources/               # Shared reference material (papers, PDFs)
+└── assets/images/                # Images used across READMEs
 ```
-✅ **Success!** Your ESP board is now communicating with ROS 2.  
 
 ---
 
-### **🎮 Running Teleoperation**  
-Open **four terminals**, sourcing ROS 2 in each one:  
+## 🧰 Common prerequisites
+
+- **ROS 2 Jazzy** — [installation guide](https://docs.ros.org/en/jazzy/Installation.html)
+- **micro-ROS Agent** — [first application tutorial](https://micro.ros.org/docs/tutorials/core/first_application_linux/)
+  (skip *"Building the firmware"* and *"Creating the micro-ROS agent"*)
+- **PlatformIO** (VS Code extension or CLI) for building microcontroller firmware
+- `colcon`, `rosdep`, and a working `~/ros2_ws` build setup
+
+Source ROS 2 in every terminal you use:
+
 ```bash
 source /opt/ros/jazzy/setup.bash
 ```
 
-#### **📌 Terminal 1: Teleop with Keyboard**  
-Run the **teleop_twist_keyboard** node:  
-```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
-```
-💡 **Keep this terminal active and use the control keys to move the robot.**  
+---
 
-#### **📌 Terminal 2: Motor Control**  
-Build and run the **teleop_to_motor** package:  
-```bash
-ros2 run teleop_to_motor teleop_to_motor
-```
-🚗 **Your robot should respond to keyboard commands.**  
+## 🚀 Getting started
 
-#### **📌 Terminal 3: Topic Echo**  
-Monitor the topic used for communication between **teleop_to_motor** and the ESP board:  
 ```bash
-ros2 topic echo /your_topic_name
+git clone https://github.com/TheAfricanJiant/ROS--2-Ten-Months-Challenge.git
+cd ROS--2-Ten-Months-Challenge
 ```
 
-#### **📌 Terminal 4: Visualizing the ROS Graph**  
-Run **rqt_graph** to visualize node connections:  
-```bash
-rgt_graph
-```
+Then open the README of the project you want to run:
+
+- [Project 01 — Teleoperation with micro-ROS](projects/01_teleop_microros/README.md)
+- [Project 02 — Stereo AI Perception Robot (XRP)](projects/02_stereo_ai_perception_xrp/README.md)
 
 ---
 
-## **🛠️ Troubleshooting**  
-- If the ESP board doesn’t connect, restart the micro-ROS agent and verify the board firmware.  
-- If the robot doesn’t move, check if `teleop_to_motor` is running and echo the topic.  
+## 📖 Resources
+
+Shared reference material lives in [`docs/resources/`](docs/resources/):
+
+- [ICC kinematics](docs/resources/icckinematics.pdf) — instantaneous centre of curvature / differential-drive kinematics
 
 ---
 
-Demo on  
-[![Watch the video](https://img.youtube.com/vi/8mwOU-UvqDQ/hqdefault.jpg)](https://www.youtube.com/watch?v=8mwOU-UvqDQ)
+## 🗺️ Roadmap
 
+- [x] micro-ROS transport working over Wi-Fi (UDP)
+- [x] Keyboard teleoperation driving real motors
+- [ ] Dual camera + Grove AI V2 object detection
+- [ ] Stereo calibration and depth estimation
+- [ ] ROS 2 perception topics (detections + distance)
+- [ ] micro-ROS on RP2040 driving the XRP from `/cmd_vel`
+- [ ] Follow behaviours (colour → object → person)
+- [ ] Stereo obstacle avoidance
+- [ ] SLAM and autonomous navigation
