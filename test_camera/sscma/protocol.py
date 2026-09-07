@@ -16,7 +16,9 @@ type  meaning
 ===== ==========================================================
 0     response - the device acknowledging the command we sent
 1     event    - a streamed result (this is where frames arrive)
-2     log      - diagnostic chatter, safe to ignore
+2     log      - diagnostic chatter, and where an unsupported
+               command is reported: ``{"type": 2, "name": "AT",
+               "code": 5, "data": "Unknown command: AT+LED?"}``
 ===== ==========================================================
 
 Base64 payloads only use ``A-Za-z0-9+/=``, so no reply body can contain a
@@ -87,8 +89,10 @@ def _parse_line(line: bytes) -> Reply | None:
     if not isinstance(payload, dict) or "name" not in payload:
         return None
 
-    # Some firmware tags the name, e.g. "INVOKE@1". Keep the bare command.
-    name = str(payload.get("name", "")).split("@", 1)[0].strip().upper()
+    # Normalise the command name so callers can match on one spelling:
+    #   "INVOKE@1" -> "INVOKE"   (firmware tags some replies)
+    #   "ID?"      -> "ID"       (queries echo the '?', actions do not)
+    name = str(payload.get("name", "")).split("@", 1)[0].strip().rstrip("?").upper()
 
     return Reply(
         name=name,

@@ -60,6 +60,18 @@ def build_parser() -> argparse.ArgumentParser:
              "switch to corner if overlays sit down-and-right of the object.",
     )
     parser.add_argument(
+        "--resolution",
+        type=int,
+        metavar="OPT_ID",
+        help="Sensor option id to select before streaming, as listed by "
+             "--info (0 = 240x240, 1 = 480x480, 2 = 640x480 on stock firmware).",
+    )
+    parser.add_argument(
+        "--info",
+        action="store_true",
+        help="Print device identity, cameras and model slots, then exit.",
+    )
+    parser.add_argument(
         "--scale",
         type=int,
         default=2,
@@ -101,6 +113,36 @@ def load_labels(path: Path | None) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
+def print_info(client: SSCMAClient) -> int:
+    """Dump what the board reports about itself."""
+    info = client.device_info()
+    if not info:
+        print("The board did not answer AT+NAME?. It is probably not running "
+              "sscma-micro firmware.")
+        return 1
+    print("Device: " + ", ".join(f"{k}={v}" for k, v in info.items()))
+
+    sensors = client.sensors()
+    if not sensors:
+        print("Cameras: none reported")
+    for sensor in sensors:
+        state = "ready" if sensor.get("state") == 1 else f"state={sensor.get('state')}"
+        print(f"Camera id={sensor.get('id')} {state}, "
+              f"current={sensor.get('opt_detail')}")
+        for opt_id, detail in sorted((sensor.get("opts") or {}).items()):
+            mark = "*" if str(sensor.get("opt_id")) == str(opt_id) else " "
+            print(f"  {mark} --resolution {opt_id}   {detail}")
+
+    models = client.models()
+    if not models:
+        print("Models: none reported")
+    for model in models:
+        size = int(model.get("size") or 0)
+        print(f"Model slot {model.get('id')}: "
+              + (f"{size} bytes" if size else "empty - --detect will not work"))
+    return 0
+
+
 def run(args: argparse.Namespace) -> int:
     port = args.port or find_port()
     labels = load_labels(args.labels)
@@ -115,9 +157,26 @@ def run(args: argparse.Namespace) -> int:
         if labels:
             client.set_labels(labels)
 
+        if args.info:
+            return print_info(client)
+
         info = client.device_info()
         if info:
             print("Device: " + ", ".join(f"{k}={v}" for k, v in info.items()))
+        else:
+            print("Warning: the board did not answer AT+NAME?. If no frames "
+                  "arrive, check it is running sscma-micro firmware.")
+
+        if args.resolution is not None:
+            client.set_resolution(args.resolution)
+            print(f"Sensor resolution option set to {args.resolution}.")
+
+        if args.detect and not client.has_model():
+            raise SSCMAError(
+                "No model is flashed on this board, so AT+INVOKE has nothing "
+                "to run. Load one with SenseCraft AI, or drop --detect for a "
+                "plain camera feed."
+            )
 
         mode = "detection (AT+INVOKE)" if args.detect else "camera feed (AT+SAMPLE)"
         print(f"Streaming {mode}. Press q or Esc in the window to stop.")

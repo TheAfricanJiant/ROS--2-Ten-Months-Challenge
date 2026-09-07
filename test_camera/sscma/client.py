@@ -9,7 +9,7 @@ from typing import Iterator, Sequence
 import serial
 from serial.tools import list_ports
 
-from .protocol import REPLY_EVENT, Reply, ReplyParser, decode_jpeg
+from .protocol import REPLY_LOG, Reply, ReplyParser, decode_jpeg
 
 __all__ = [
     "DEFAULT_BAUDRATE",
@@ -19,14 +19,21 @@ __all__ = [
     "PortInfo",
     "available_ports",
     "find_port",
+    "identify",
     "SSCMAClient",
 ]
 
 #: sscma-micro ships with the USB CDC link at this rate.
 DEFAULT_BAUDRATE = 921600
 
-#: Seeed Studio's USB vendor ID, used to rank candidate ports.
-SEEED_VENDOR_ID = 0x2886
+#: USB vendor IDs of bridges these boards ship behind. The Grove Vision AI V2
+#: sits behind a WCH CH343, so matching on Seeed's own VID alone finds nothing.
+BRIDGE_VENDOR_IDS = {
+    0x1A86: "WCH (CH34x)",
+    0x2886: "Seeed",
+    0x10C4: "Silicon Labs",
+    0x0403: "FTDI",
+}
 
 #: SSCMA reports boxes as [x, y, w, h, score, target] with x/y at the box
 #: *centre*. Firmware forks occasionally emit a top-left origin instead; if
@@ -85,36 +92,57 @@ class PortInfo:
     description: str
     hwid: str
     vid: int | None
+    serial_number: str | None
 
     @property
-    def is_seeed(self) -> bool:
-        return self.vid == SEEED_VENDOR_ID
+    def is_candidate(self) -> bool:
+        """Sits behind a USB-serial bridge these boards are known to use."""
+        return self.vid in BRIDGE_VENDOR_IDS
 
     def __str__(self) -> str:
-        tag = "  <- Seeed device" if self.is_seeed else ""
-        return f"{self.device:8} {self.description}{tag}"
+        bits = [f"{self.device:6}", self.description]
+        if self.serial_number:
+            bits.append(f"[SER={self.serial_number}]")
+        return "  ".join(bits)
 
 
 def available_ports() -> list[PortInfo]:
-    """Every serial port Windows currently exposes, Seeed devices first."""
+    """Every serial port Windows exposes, likely boards first."""
     ports = [
         PortInfo(
             device=p.device,
             description=p.description or "unknown device",
             hwid=p.hwid or "",
             vid=p.vid,
+            serial_number=p.serial_number,
         )
         for p in list_ports.comports()
     ]
-    ports.sort(key=lambda p: (not p.is_seeed, p.device))
+    ports.sort(key=lambda p: (not p.is_candidate, p.device))
     return ports
 
 
-def find_port() -> str:
+def identify(port: str, baudrate: int = DEFAULT_BAUDRATE, timeout: float = 1.5) -> str | None:
+    """Return the board's reported name, or None if it does not speak SSCMA.
+
+    Two identical boards look the same over USB descriptors, and a board
+    running the wrong firmware looks the same as a healthy one. Asking is the
+    only reliable way to tell them apart.
+    """
+    try:
+        with SSCMAClient(port=port, baudrate=baudrate, read_timeout=0.3) as client:
+            name = client.device_info().get("name")
+            return name or None
+    except (SSCMAError, serial.SerialException, OSError):
+        return None
+
+
+def find_port(probe: bool = True) -> str:
     """Best guess at the Vision AI V2's port.
 
-    Prefers a Seeed vendor ID; falls back to the only port present. Raises if
-    the choice is ambiguous, so we never stream from the wrong device.
+    With one candidate, use it. With several, ask each one who it is and pick
+    the board that actually answers, so a second board running unrelated
+    firmware cannot be selected by accident.
     """
     ports = available_ports()
     if not ports:
@@ -123,15 +151,29 @@ def find_port() -> str:
             "cable will power the board but carry no data)."
         )
 
-    seeed = [p for p in ports if p.is_seeed]
-    if len(seeed) == 1:
-        return seeed[0].device
-    if not seeed and len(ports) == 1:
-        return ports[0].device
+    candidates = [p for p in ports if p.is_candidate] or ports
+    if len(candidates) == 1:
+        return candidates[0].device
+
+    if probe:
+        responding = [(p, identify(p.device)) for p in candidates]
+        alive = [(p, name) for p, name in responding if name]
+        if len(alive) == 1:
+            port, name = alive[0]
+            print(f"Auto-selected {port.device} ({name}); "
+                  f"{len(candidates) - 1} other port(s) did not answer.")
+            return port.device
+        if len(alive) > 1:
+            listing = "\n  ".join(f"{p}  -> {name}" for p, name in alive)
+            raise SSCMAError(
+                "Several boards answered. Pick one with --port (the SER= value "
+                f"is stable per board):\n  {listing}"
+            )
 
     listing = "\n  ".join(str(p) for p in ports)
     raise SSCMAError(
-        f"Could not pick a port automatically. Choose one with --port:\n  {listing}"
+        "No port answered as an SSCMA device. Pick one manually with --port, "
+        "or check that the board is running sscma-micro firmware:\n  " + listing
     )
 
 
@@ -250,11 +292,25 @@ class SSCMAClient:
                     "running sscma-micro, and is the baud rate right?"
                 )
 
-    def command(self, command: str, expect: str, timeout: float = 3.0):
-        """Send a command and wait for the device's acknowledgement."""
+    def command(self, command: str, expect: str | None = None, timeout: float = 3.0):
+        """Send a command and wait for the device's acknowledgement.
+
+        ``expect`` defaults to the command's own name. Reply names arrive
+        without any trailing '?' or '@tag' (see :mod:`.protocol`), so
+        ``AT+VER?`` is matched by ``VER``.
+        """
+        if expect is None:
+            expect = command.split("=", 1)[0].rstrip("?")
+        expect = expect.split("=", 1)[0].rstrip("?").upper()
+
         self.write(command)
         for reply in self.replies(timeout=timeout):
-            if reply.name != expect.upper() or not reply.is_response:
+            # Unsupported commands come back as a log line, not a response.
+            if reply.type == REPLY_LOG and isinstance(reply.data, str) \
+                    and reply.data.lower().startswith("unknown command"):
+                raise SSCMAError(f"This firmware does not support AT+{command}.")
+
+            if reply.name != expect or not reply.is_response:
                 continue
             if not reply.ok:
                 raise SSCMAError(f"AT+{command} rejected (code {reply.code}).")
@@ -276,18 +332,52 @@ class SSCMAClient:
             return
 
     def device_info(self) -> dict[str, str]:
-        """Identity strings, for confirming we are talking to the right board."""
+        """Identity strings, for confirming we are talking to the right board.
+
+        ``AT+ID?`` and ``AT+NAME?`` answer with a bare string; ``AT+VER?``
+        answers with a dict, of which the firmware build date is the useful
+        part.
+        """
         info: dict[str, str] = {}
-        for command, key in (("ID?", "id"), ("NAME?", "name"), ("VER?", "version")):
+
+        for command, key in (("ID?", "id"), ("NAME?", "name")):
             try:
-                data = self.command(command, expect=command.rstrip("?"), timeout=2.0)
+                data = self.command(command, timeout=2.0)
             except SSCMAError:
                 continue
-            if isinstance(data, dict):
-                data = next(iter(data.values()), "")
-            if data:
-                info[key] = str(data)
+            if isinstance(data, str) and data:
+                info[key] = data
+
+        try:
+            version = self.command("VER?", timeout=2.0)
+        except SSCMAError:
+            version = None
+        if isinstance(version, dict):
+            software = version.get("software")
+            if software:
+                info["firmware"] = str(software)
+        elif isinstance(version, str) and version:
+            info["firmware"] = version
+
         return info
+
+    def sensors(self) -> list[dict]:
+        """Cameras the firmware can see. ``state`` 1 means present and ready."""
+        data = self.command("SENSORS?", timeout=2.0)
+        return data if isinstance(data, list) else []
+
+    def models(self) -> list[dict]:
+        """Model slots. A slot with ``size`` 0 holds no model."""
+        data = self.command("MODELS?", timeout=2.0)
+        return data if isinstance(data, list) else []
+
+    def has_model(self) -> bool:
+        """True when a model is actually flashed, so AT+INVOKE can work."""
+        return any(int(m.get("size") or 0) > 0 for m in self.models())
+
+    def set_resolution(self, opt_id: int, sensor_id: int = 1) -> None:
+        """Select one of the resolutions ``AT+SENSORS?`` advertises."""
+        self.command(f"SENSOR={sensor_id},1,{opt_id}", expect="SENSOR", timeout=4.0)
 
     def set_labels(self, labels: Sequence[str]) -> None:
         self.labels = list(labels)
