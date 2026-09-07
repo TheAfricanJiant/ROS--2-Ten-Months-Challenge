@@ -26,3 +26,5 @@ projects/*/calibration/captures/
 .idea/
 .DS_Store
 Thumbs.db
+snapshots/
+.venv/

@@ -33,9 +33,18 @@ This repository is a **collection of practical ROS 2 projects**. Each project li
 │       ├── calibration/          # Camera intrinsics / stereo extrinsics
 │       ├── scripts/              # Standalone test & bring-up scripts
 │       └── docs/                 # Wiring, notes, measurements
+├── test_camera/                  # Bench tool: Grove Vision AI V2 feed on Windows
 ├── docs/resources/               # Shared reference material (papers, PDFs)
 └── assets/images/                # Images used across READMEs
 ```
+
+---
+
+## 🔧 Tools
+
+| Tool | What it does |
+|------|--------------|
+| [`test_camera/`](test_camera/README.md) | Streams JPEG frames from a Grove Vision AI V2 over USB serial and displays them with OpenCV on Windows — bench-testing the cameras and AI modules before any ROS 2 is involved |
 
 ---
 

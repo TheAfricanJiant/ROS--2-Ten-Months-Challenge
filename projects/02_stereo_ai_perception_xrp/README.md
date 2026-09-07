@@ -57,6 +57,10 @@ The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-l
 - Get bounding boxes + confidence
 - Confirm AI works independently before ROS 2
 
+> Tooling: [`test_camera/`](../../test_camera/README.md) streams a live feed from
+> a Vision AI V2 over serial (`--detect` overlays the model's boxes), so both
+> modules can be checked in day and IR light from a Windows laptop.
+
 ### Objective 3 — Build stereo vision system
 
 - Rigidly mount the two cameras
@@ -135,5 +139,6 @@ Everything beyond that is the next phase.
 
 ## 📖 Related
 
+- [`test_camera/`](../../test_camera/README.md) — Vision AI V2 serial camera feed, used for Objective 2
 - [Project 01 — Teleoperation with micro-ROS](../01_teleop_microros/README.md) — the micro-ROS transport groundwork this project builds on
 - [ICC kinematics](../../docs/resources/icckinematics.pdf)
