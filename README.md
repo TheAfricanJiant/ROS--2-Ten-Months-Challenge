@@ -44,7 +44,7 @@ This repository is a **collection of practical ROS 2 projects**. Each project li
 
 | Tool | What it does |
 |------|--------------|
-| [`test_camera/`](test_camera/README.md) | Streams JPEG frames from a Grove Vision AI V2 over USB serial and displays them with OpenCV on Windows — bench-testing the cameras and AI modules before any ROS 2 is involved |
+| [`test_camera/`](test_camera/README.md) | Six bench tests for the perception hardware, before any ROS 2 is involved: SenseCraft model loading, live camera feed, night-vision check, camera/lens properties, stereo rig calibration (writes ROS 2 `CameraInfo`), and a three-panel live stereo depth view |
 
 ---
 

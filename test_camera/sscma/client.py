@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Iterator, Sequence
@@ -19,6 +20,9 @@ __all__ = [
     "PortInfo",
     "available_ports",
     "find_port",
+    "port_hint",
+    "permission_hint",
+    "open_failure_hint",
     "identify",
     "SSCMAClient",
 ]
@@ -106,8 +110,65 @@ class PortInfo:
         return "  ".join(bits)
 
 
+def port_hint() -> str:
+    """An example port name for whatever OS we are on."""
+    if sys.platform.startswith("win"):
+        return "COM3"
+    if sys.platform == "darwin":
+        return "/dev/cu.wchusbserial1420"
+    return "/dev/ttyACM0"
+
+
+def open_failure_hint(exc: BaseException) -> str:
+    """Advice matched to *why* the port would not open.
+
+    A missing port and a busy port are different problems with different
+    fixes, and reporting one as the other sends people hunting for a program
+    that is not there.
+    """
+    cause = exc.__cause__ or exc.__context__ or exc
+    text = f"{exc} {cause}".lower()
+
+    missing = (
+        isinstance(cause, FileNotFoundError)
+        or "cannot find the file" in text
+        or "no such file" in text
+        or getattr(cause, "errno", None) == 2
+    )
+    if missing:
+        return ("That port does not exist. The board may be unplugged, or it "
+                "may have come back on a different port - list them with:\n"
+                "  python stream_camera.py --list-ports")
+
+    denied = (
+        isinstance(cause, PermissionError)
+        or "access is denied" in text
+        or "permission denied" in text
+        or getattr(cause, "errno", None) == 13
+    )
+    if denied:
+        return permission_hint()
+
+    return ("Check the board is plugged in and no other program is using it "
+            "(python stream_camera.py --list-ports).")
+
+
+def permission_hint() -> str:
+    """Platform-specific advice when a port exists but will not open."""
+    if sys.platform.startswith("win"):
+        return ("Another program holds the port - a SenseCraft tab in Chrome "
+                "keeps it open even when it fails to connect.")
+    if sys.platform == "darwin":
+        return ("Another program holds the port, or macOS has not approved the "
+                "USB-serial driver (System Settings -> Privacy & Security).")
+    return ("Another program holds the port, or your user is not in the "
+            "'dialout' group. Add yourself with:\n"
+            "  sudo usermod -a -G dialout $USER\n"
+            "then log out and back in.")
+
+
 def available_ports() -> list[PortInfo]:
-    """Every serial port Windows exposes, likely boards first."""
+    """Every serial port the OS exposes, likely boards first."""
     ports = [
         PortInfo(
             device=p.device,
@@ -182,7 +243,7 @@ class SSCMAClient:
 
     Use as a context manager so the device is always told to stop streaming::
 
-        with SSCMAClient("COM5") as client:
+        with SSCMAClient(port_hint()) as client:
             for frame in client.stream():
                 ...
     """
@@ -218,7 +279,9 @@ class SSCMAClient:
                 write_timeout=2.0,
             )
         except serial.SerialException as exc:
-            raise SSCMAError(f"Could not open {self.port}: {exc}") from exc
+            raise SSCMAError(
+                f"Could not open {self.port}: {exc}\n{open_failure_hint(exc)}"
+            ) from exc
 
         # The board may still be streaming from a previous run.
         self.stop()

@@ -57,9 +57,10 @@ The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-l
 - Get bounding boxes + confidence
 - Confirm AI works independently before ROS 2
 
-> Tooling: [`test_camera/`](../../test_camera/README.md) streams a live feed from
-> a Vision AI V2 over serial (`--detect` overlays the model's boxes), so both
-> modules can be checked in day and IR light from a Windows laptop.
+> Tooling: [`test_camera/`](../../test_camera/README.md) covers this end to end —
+> load a detection model from SenseCraft, stream the live feed over serial, and
+> run the lights-off night-vision check (`camera_info.py --night`) on each
+> module.
 
 ### Objective 3 — Build stereo vision system
 
@@ -68,6 +69,18 @@ The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-l
 - Get simultaneous left/right images
 - Later perform proper stereo calibration
 - Generate disparity/depth
+
+> Tooling: [`calibrate_stereo.py`](../../test_camera/README.md#test-5--stereo-calibration)
+> turns a measured baseline and convergence angle into `stereo_config.yaml`
+> plus `left.yaml`/`right.yaml` in `sensor_msgs/CameraInfo` format, so the same
+> rig feeds both the bench tool and the ROS 2 image pipeline.
+> [`stereo_vision.py`](../../test_camera/README.md#test-6--stereo-vision) then
+> shows both eyes and the triangulated distance live.
+>
+> Two limits worth designing around: the boards have **no hardware sync**, so
+> frames are paired by arrival time and fast motion corrupts depth; and at
+> 240x240 with a ~79 mm baseline, one pixel of disparity is worth ~51 mm of
+> depth at 1 m and ~112 mm at 1.5 m.
 
 ### Objective 4 — Integrate everything into ROS 2
 

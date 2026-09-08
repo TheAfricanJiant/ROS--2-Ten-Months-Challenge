@@ -27,3 +27,6 @@ projects/*/calibration/captures/
 .DS_Store
 Thumbs.db
 snapshots/
+
+# Firmware images: download from the official releases, do not commit
+*.img
