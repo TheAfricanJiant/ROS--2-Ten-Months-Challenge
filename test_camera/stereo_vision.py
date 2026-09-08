@@ -173,16 +173,39 @@ def run(args) -> int:
                                box_format=args.box_format)
 
     with left_client, right_client:
+        models = {}
         for side, client in (("left", left_client), ("right", right_client)):
             info = client.device_info()
             print(f"  {side}: {info.get('name', 'unknown')} "
                   f"{info.get('firmware', '')}")
-            if args.detect and not client.has_model():
+
+            if not args.detect:
+                continue
+
+            model = client.model_info()
+            models[side] = model
+            if model:
+                classes = client.adopt_model_labels()
+                print(f"    model: {model.get('model_name', 'unknown')}"
+                      + (f"  classes: {', '.join(classes)}" if classes else ""))
+            else:
+                # AT+INVOKE is the authority on whether inference can run, so
+                # warn rather than refuse - the metadata is only a hint.
+                print(f"    warning: no model metadata from the {side} board; "
+                      "continuing anyway")
+
+        # Both eyes must run the same model, or detections cannot be matched
+        # between them. The metadata checksum makes that checkable.
+        if args.detect and models.get("left") and models.get("right"):
+            left_sum = models["left"].get("checksum")
+            right_sum = models["right"].get("checksum")
+            if left_sum and right_sum and left_sum != right_sum:
                 raise SSCMAError(
-                    f"The {side} board ({client.port}) has no model flashed, so "
-                    "it cannot detect anything. Load the SAME detection model "
-                    "onto both boards from SenseCraft AI, then run this again. "
-                    "Use --no-detect to just check the two feeds are live."
+                    "The two boards are running different models:\n"
+                    f"  left  {models['left'].get('model_name')} ({left_sum})\n"
+                    f"  right {models['right'].get('model_name')} ({right_sum})\n"
+                    "Detections cannot be matched between eyes unless both run "
+                    "the same model. Flash the same one from SenseCraft AI."
                 )
 
         capture = StereoCapture(

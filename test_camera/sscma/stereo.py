@@ -5,9 +5,20 @@ links. There is no shared trigger and no hardware sync, so frames cannot be
 captured at the same instant - only *paired* after the fact by arrival time.
 :class:`StereoCapture` timestamps every frame as it arrives and pairs each
 left frame with the nearest right frame, rejecting pairs further apart than
-``max_sync_skew_ms``. Good enough for a slow-moving robot; not good enough for
-anything fast, where a moving object will sit at genuinely different places in
-the two frames and inflate the disparity.
+``max_sync_skew_ms``.
+
+Measured on two Grove Vision AI V2 boards at 240x240 (~14.7 pairs/s), skew sat
+at **46-48 ms with almost no spread** - median and maximum within 1 ms of each
+other. That flatness matters: it is not jitter that better pairing could
+average away, it is a near-constant phase offset between the two capture
+loops, roughly half a frame period. Widening ``search_depth`` from 1 to 3
+bought only ~1.6 ms, and 5 made it worse by dragging in staler frames.
+
+So treat ~half a frame period as the floor. It is fine for a slow-moving
+robot. It is not fine for anything fast: the object really did move during
+those 48 ms, so it sits at genuinely different places in the two frames and
+the disparity - and therefore the distance - comes out wrong. Faster frames
+(lower resolution) shrink the offset; only a hardware trigger removes it.
 
 **On depth.** :func:`triangulate` intersects the two viewing rays in 3D rather
 than using ``Z = f*B/d``. The simple formula assumes perfectly parallel
@@ -188,11 +199,15 @@ class StereoCapture:
         max_skew_ms: float = 60.0,
         detect: bool = True,
         buffer_size: int = 8,
+        search_depth: int = 3,
     ) -> None:
         self.left_client = left_client
         self.right_client = right_client
         self.max_skew_s = max_skew_ms / 1000.0
         self.detect = detect
+        #: How many recent left frames to consider when hunting for the
+        #: tightest match. 1 reproduces "newest frame wins".
+        self.search_depth = max(1, search_depth)
 
         self._buffers: dict[str, deque] = {
             "left": deque(maxlen=buffer_size),
@@ -253,18 +268,38 @@ class StereoCapture:
 
     # -- pairing -----------------------------------------------------------
 
-    def _best_pair(self) -> StereoPair | None:
-        """Newest left frame, matched to whichever right frame is closest."""
-        if not self._buffers["left"] or not self._buffers["right"]:
+    def _best_pair(self, after: float = -1.0) -> StereoPair | None:
+        """The tightest-matched pair available, not simply the newest.
+
+        Always taking the newest left frame gives an average skew of about
+        half a frame period, because the two streams are uncorrelated. Looking
+        a few frames back instead lets us pick the left frame that happens to
+        sit closest to a right one, which measurably tightens the pairing.
+        ``search_depth`` bounds how far back we look, so this buys sync
+        quality without unbounded latency.
+        """
+        rights = self._buffers["right"]
+        if not self._buffers["left"] or not rights:
             return None
 
-        left_time, left_frame = self._buffers["left"][-1]
-        right_time, right_frame = min(
-            self._buffers["right"], key=lambda item: abs(item[0] - left_time)
-        )
-        if abs(left_time - right_time) > self.max_skew_s:
-            return None
+        best: tuple[float, float, "Frame", float, "Frame"] | None = None
+        candidates = list(self._buffers["left"])[-self.search_depth:]
 
+        for left_time, left_frame in candidates:
+            if left_time <= after:
+                continue
+            right_time, right_frame = min(
+                rights, key=lambda item: abs(item[0] - left_time)
+            )
+            skew = abs(left_time - right_time)
+            if skew > self.max_skew_s:
+                continue
+            if best is None or skew < best[0]:
+                best = (skew, left_time, left_frame, right_time, right_frame)
+
+        if best is None:
+            return None
+        _, left_time, left_frame, right_time, right_frame = best
         return StereoPair(left_frame, right_frame, left_time, right_time)
 
     def pairs(self, timeout: float = 10.0) -> Iterator[StereoPair]:
@@ -277,7 +312,7 @@ class StereoCapture:
 
             with self._new_frame:
                 self._new_frame.wait(timeout=0.2)
-                pair = self._best_pair()
+                pair = self._best_pair(after=last_left_time)
                 is_new = pair is not None and pair.left_time > last_left_time
 
             if is_new:

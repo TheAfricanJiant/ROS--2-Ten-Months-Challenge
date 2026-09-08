@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import sys
 import time
 from dataclasses import dataclass, field
@@ -430,13 +433,68 @@ class SSCMAClient:
         return data if isinstance(data, list) else []
 
     def models(self) -> list[dict]:
-        """Model slots. A slot with ``size`` 0 holds no model."""
+        """Raw model slots from ``AT+MODELS?``.
+
+        Note that ``size`` is reported as 0 on this firmware **even when a
+        model is flashed**, so it cannot be used to decide whether one is
+        present. Use :meth:`model_info` for that.
+        """
         data = self.command("MODELS?", timeout=2.0)
         return data if isinstance(data, list) else []
 
+    def model_info(self) -> dict | None:
+        """Metadata for the flashed model, or None if we cannot read any.
+
+        ``AT+INFO?`` returns a base64-encoded JSON blob that SenseCraft writes
+        alongside the model. It is the only reliable description of what is
+        actually loaded, and it carries the class names, so callers do not
+        need a separate labels file::
+
+            {"model_name": "Face Detection", "classes": ["face"],
+             "task": "detect", "checksum": "377aee70..."}
+        """
+        try:
+            data = self.command("INFO?", timeout=2.0)
+        except SSCMAError:
+            return None
+        if not isinstance(data, dict):
+            return None
+
+        blob = data.get("info")
+        if not isinstance(blob, str) or not blob:
+            return None
+
+        try:
+            padded = blob + "=" * (-len(blob) % 4)
+            decoded = base64.b64decode(padded).decode("utf-8", "replace")
+            parsed = json.loads(decoded)
+        except (binascii.Error, ValueError):
+            return None
+
+        return parsed if isinstance(parsed, dict) else None
+
     def has_model(self) -> bool:
-        """True when a model is actually flashed, so AT+INVOKE can work."""
-        return any(int(m.get("size") or 0) > 0 for m in self.models())
+        """True when the board reports metadata for a flashed model.
+
+        Treat a False as a hint, not a verdict: the authority on whether
+        inference can run is whether ``AT+INVOKE`` is accepted.
+        """
+        return self.model_info() is not None
+
+    def model_classes(self) -> list[str]:
+        """Class names from the flashed model's metadata."""
+        info = self.model_info() or {}
+        classes = info.get("classes")
+        if isinstance(classes, list):
+            return [str(c) for c in classes]
+        return []
+
+    def adopt_model_labels(self) -> list[str]:
+        """Use the model's own class names for detection labels."""
+        classes = self.model_classes()
+        if classes:
+            self.set_labels(classes)
+        return classes
 
     def set_resolution(self, opt_id: int, sensor_id: int = 1) -> None:
         """Select one of the resolutions ``AT+SENSORS?`` advertises."""

@@ -161,8 +161,22 @@ python stream_camera.py --port PORT --resolution 2 --scale 2
 | `s` | save a PNG into `snapshots/` |
 | `d` | toggle the box + HUD overlay |
 
-`--detect` needs the model from Test 1. Without one the tool says so plainly
-rather than failing obscurely.
+`--detect` needs the model from Test 1. `--info` reads the model's own
+metadata, so it can tell you exactly what is loaded:
+
+```
+Model: Face Detection  (id 60094, task detect)
+  classes: face
+  confidence threshold 60%, IoU 45%
+  checksum: 377aee70190387cc4cf2435f13aab3af
+```
+
+Those class names are picked up automatically, so **you do not need a labels
+file** — `--labels` is only for overriding them.
+
+> **Do not trust `AT+MODELS?` for this.** It reports `size: 0` whether or not a
+> model is flashed, on every board tested. The only reliable source is the
+> base64 metadata blob in `AT+INFO?`, which is what these tools read.
 
 ### Resolution and throughput
 
@@ -365,6 +379,11 @@ show the layout and verify the maths — not a photograph of a real scene.)*
 | `d` | toggle overlays |
 | `a` | anaglyph ⇄ plain blend |
 
+Before streaming, both boards are asked what model they are running and the
+metadata **checksums are compared**. Different models on the two eyes is a hard
+error, because detections cannot be matched between eyes that disagree about
+what they are looking at.
+
 `--no-detect` streams both feeds with no model and no depth, which is a useful
 way to check the two cameras are both alive and roughly aligned before you
 worry about detections.
@@ -377,13 +396,20 @@ after the fact* by arrival time. Every frame is timestamped as it arrives, and
 each left frame is matched to the nearest right frame; pairs further apart than
 `max_sync_skew_ms` (default 60 ms) are thrown away.
 
-The HUD shows the live skew. That is fine for a slow-moving robot. It is **not**
-fine for anything fast: if the object moves between the two captures it sits at
-genuinely different places in the two frames, the disparity is inflated, and
-the distance comes out wrong. The tool warns when average skew climbs toward
-the limit.
+**Measured on two real boards** at 240×240 (~14.7 pairs/s): skew sat at
+**46–48 ms with almost no spread** — median and maximum within 1 ms of each
+other. That flatness is the important part. It is not jitter that smarter
+pairing could average away; it is a near-constant phase offset between the two
+capture loops, about half a frame period. Searching more frames back for a
+tighter match bought only ~1.6 ms, and searching too far made it worse.
 
-Dropping to 240×240 helps, because faster frames mean tighter pairing.
+So treat **half a frame period as the floor**. The HUD shows live skew and
+warns as it approaches the limit. This is fine for a slow-moving robot; it is
+not fine for anything fast, because the object genuinely did move during those
+48 ms, so the disparity — and the distance — comes out wrong.
+
+Faster frames (lower resolution) shrink the offset. Only a hardware trigger
+removes it.
 
 ### Getting a believable distance
 
@@ -458,9 +484,10 @@ calling `imshow` — which is the whole point of building it this way.
 | Access denied / permission error | **Windows/macOS:** another program holds the port — a SenseCraft tab in Chrome keeps it open even when it fails to connect. **Linux:** add yourself to `dialout` and log back in. |
 | Port opens but no frames | Run `python diagnose.py PORT` — usually the wrong firmware, not the camera. |
 | "did not answer AT+NAME?" | Not running sscma-micro. See [Recovering a board](#recovering-a-board-that-never-sees-a-camera). |
-| "No model is flashed" | `--detect` and stereo depth both need a model. Go back to Test 1. |
+| "could not read model metadata" | The board did not answer `AT+INFO?`. The tools warn and try anyway — `AT+INVOKE` is the real authority. |
+| "The two boards are running different models" | Flash the same model on both from SenseCraft; the eyes cannot be matched otherwise. |
 | Night test says "black" | IR LEDs unpowered, or the camera has an IR-cut filter (check `camera_info.py --list`). |
-| Boxes offset down-and-right | Firmware reports corner-origin boxes: add `--box-format corner`. |
+| Boxes offset down-and-right | Firmware reports corner-origin boxes: add `--box-format corner`. The default (`center`) is confirmed correct on firmware `2025.01.02`. |
 | "no object matched in both eyes" | The object is outside the overlap, or only one board has the model. |
 | Stereo distances all wrong by the same ratio | Baseline or focal length is off. Re-measure the baseline; run `camera_info.py --measure`. |
 | Stereo distances jump around | Poor sync (check the HUD skew), or the object is at the range limit where one pixel is worth a lot of depth. |
@@ -539,13 +566,20 @@ to within 1e-6 m for both parallel and toed-in rigs, disparity agreeing with
 `f·B/Z`, detection matching, config round-trips, and `Tx = -fx·B` in the
 generated `CameraInfo`.
 
+**Verified with a model flashed** — with SenseCraft's *Face Detection* on both
+boards: model metadata read and identified, class names adopted automatically,
+`--detect` streaming detections at ~21 ms inference, and the centre-origin box
+format confirmed by rendering both interpretations against a real detection.
+Two-board capture ran at 14.7 synchronised pairs/s with matching model
+checksums.
+
 **Not yet exercised on hardware:**
 
-- **`--detect` and the whole of Test 6.** No model is currently flashed on
-  either board, so the detection and stereo-depth paths have only ever run
-  against synthetic frames. The maths is verified; the wiring to real
-  detections is not. Expect to need `--box-format corner` if overlays land
-  down-and-right of the object.
+- **A real stereo distance.** The capture, pairing, matching and checksum
+  checks all run against the two boards, but no object has yet been placed in
+  front of both cameras to produce a triangulated reading. The maths is
+  verified against synthetic frames to 1e-6 m; what remains unproven is the
+  accuracy of a real measurement against a tape measure.
 - **Test 3 (night mode).** The code path runs, but no one has yet done the
   lights-off run with an IR module attached.
 - **Linux and macOS.** Windows only, so far.

@@ -133,13 +133,24 @@ def print_info(client: SSCMAClient) -> int:
             mark = "*" if str(sensor.get("opt_id")) == str(opt_id) else " "
             print(f"  {mark} --resolution {opt_id}   {detail}")
 
-    models = client.models()
-    if not models:
-        print("Models: none reported")
-    for model in models:
-        size = int(model.get("size") or 0)
-        print(f"Model slot {model.get('id')}: "
-              + (f"{size} bytes" if size else "empty - --detect will not work"))
+    # AT+MODELS? reports size 0 even when a model is flashed, so the metadata
+    # blob from AT+INFO? is the only thing worth reading here.
+    model = client.model_info()
+    if model:
+        print(f"Model: {model.get('model_name', 'unknown')}"
+              f"  (id {model.get('model_id', '?')}, task {model.get('task_name') or ''}"
+              f"{model.get('arguments', {}).get('task', '')})")
+        classes = model.get("classes") or []
+        if classes:
+            print(f"  classes: {', '.join(str(c) for c in classes)}")
+        args = model.get("arguments") or {}
+        if args.get("conf") is not None:
+            print(f"  confidence threshold {args['conf']}%, IoU {args.get('iou', '?')}%")
+        if model.get("checksum"):
+            print(f"  checksum: {model['checksum']}")
+    else:
+        print("Model: none reported by AT+INFO? - load one from SenseCraft AI "
+              "if you want --detect")
     return 0
 
 
@@ -171,12 +182,22 @@ def run(args: argparse.Namespace) -> int:
             client.set_resolution(args.resolution)
             print(f"Sensor resolution option set to {args.resolution}.")
 
-        if args.detect and not client.has_model():
-            raise SSCMAError(
-                "No model is flashed on this board, so AT+INVOKE has nothing "
-                "to run. Load one with SenseCraft AI, or drop --detect for a "
-                "plain camera feed."
-            )
+        if args.detect:
+            model = client.model_info()
+            if model:
+                print(f"Model: {model.get('model_name', 'unknown')}")
+                # The model knows its own class names; only override them if
+                # the user explicitly supplied a labels file.
+                if not labels:
+                    adopted = client.adopt_model_labels()
+                    if adopted:
+                        print(f"  classes: {', '.join(adopted)}")
+            else:
+                # Not a hard stop: AT+INVOKE is the real authority, and it
+                # reports a clear error of its own if no model can run.
+                print("Warning: could not read model metadata from this board. "
+                      "Trying anyway - if no model is flashed, AT+INVOKE will "
+                      "say so.")
 
         mode = "detection (AT+INVOKE)" if args.detect else "camera feed (AT+SAMPLE)"
         print(f"Streaming {mode}. Press q or Esc in the window to stop.")
