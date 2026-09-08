@@ -2,7 +2,7 @@
 
 A long-term ROS 2 robotics challenge documenting my progression from ROS 2 fundamentals and micro-ROS to AI perception, stereo vision, SLAM, and autonomous robotics using the XRP platform.
 
-![ROS 2 Ten Months Challenge](assets/images/teleop_microros_demo.png)
+![ROS 2 Ten Months Challenge](assets/images/combined_high_quality.jpg)
 
 This repository is a **collection of practical ROS 2 projects**. Each project lives in its own folder under [`projects/`](projects/) with its own README, firmware, and ROS 2 workspace, so it can be read, built, and run independently.
 
