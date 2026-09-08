@@ -7,9 +7,11 @@ A Raspberry Pi 5 running ROS 2 with **two night-vision cameras** for stereo dept
 The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-level motor control stays on the Pico.
 
 ```
-[ Cam L ] [ Cam R ]        [ Grove AI V2 ×2 ]
-     \        /                    |
-      \      /                     |
+   [ Cam L ]                     [ Cam R ]       
+       |                             |
+       |                             |
+ [ Grove AI V2  ]            [ Grove AI V2 ×2 ]
+       |                             |
    ┌───────────────────────────────────────┐
    │  Raspberry Pi 5 — ROS 2 (Jazzy)       │
    │  stereo depth · detections · logic    │
