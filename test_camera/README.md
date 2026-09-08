@@ -13,7 +13,7 @@ The tests build on each other, so work through them in order:
 |---|------|----------------|
 | 1 | [SenseCraft AI](#test-1--sensecraft-ai) | The board is alive and a detection model is loaded |
 | 2 | [Live camera feed](#test-2--live-camera-feed) | Frames actually reach your computer |
-| 3 | [Night mode](#test-3--night-mode) | The IR illumination works in darkness |
+| 3 | [Night mode](#test-3--night-mode) | The IR illumination works, and you can see what it sees |
 | 4 | [Camera properties](#test-4--camera-properties) | You know your lens's real focal length |
 | 5 | [Stereo calibration](#test-5--stereo-calibration) | The rig is measured, and ROS 2 can load it |
 | 6 | [Stereo vision](#test-6--stereo-vision) | Two eyes agree on how far away something is |
@@ -219,6 +219,64 @@ faintly purple — a quick way to tell "not powered" from "not detected".
 > filter blocks exactly the wavelength the LEDs emit. You need a **NoIR** or a
 > dedicated IR module. Run `python camera_info.py --list` and check the `IR`
 > column.
+
+### Watching it live
+
+The pass/fail check is the quick version. To actually *look* at what the
+sensor sees in the dark:
+
+```
+python night_vision.py --port PORT
+python night_vision.py --port PORT --detect --scale 1.4
+```
+
+![Six-panel IR night-vision view](../assets/images/night_vision_grid.png)
+
+*(Captured from a real board in a dark room. The two "face" boxes are false
+positives on bright IR reflections — worth seeing, because it is exactly what
+a detector does when the only high-contrast things in frame are your own
+illuminators bouncing back.)*
+
+Six views of the same frame, live:
+
+| Panel | Shows |
+|-------|-------|
+| **1 RAW IR** | Exactly what the sensor sends. |
+| **2 ENHANCED** | CLAHE — equalises locally, so shadow detail survives next to a bright hotspot. This is where you see whether detail is *recoverable*. |
+| **3 FALSE COLOUR** | Intensity through a heat-style palette. Press `p` to cycle INFERNO / JET / TURBO / HOT / MAGMA / OCEAN. |
+| **4 NIGHT VISION** | The green-phosphor look, with gamma lift, grain and vignette. |
+| **5 IR SPREAD** | The scene blurred away to leave the illumination pattern — where your LEDs actually throw light. White outlines mark blown-out pixels, dark outlines mark dead ones. |
+| **6 ANALYSIS** | Live histogram, exposure readings, a brightness trend, and a verdict. |
+
+| Key | Action |
+|-----|--------|
+| `q` / `Esc` | quit |
+| `s` | save the whole grid as a PNG |
+| `r` | start/stop recording to `night_vision.avi` (`--record` sets the name) |
+| `p` | cycle the false-colour palette |
+| `1`–`6` | blow up a single panel |
+| `0` | back to the grid |
+
+> ### These are not thermal cameras
+>
+> This matters for interpreting panel 3. An IR module on a Grove Vision AI V2
+> sees **near-infrared light reflected off things**, the same way a normal
+> camera sees visible light — the IR LEDs are just a torch you cannot see. It
+> measures **brightness, never temperature**.
+>
+> So in the heat palette, a cold white wall lit by the LEDs reads "hot", and a
+> warm dark jumper reads "cold". It is a way of reading brightness, not a
+> thermal image. For real temperature you need a thermal sensor such as an
+> MLX90640 — a different device entirely.
+
+**Reading panel 5 is the useful trick.** IR LEDs fall off sharply with
+distance, and they are aimed. If the bright region sits in a corner rather
+than where your subject is, angle the illuminators — that costs nothing and
+buys more usable range than any amount of image processing.
+
+Sample numbers from a real run in a dark room: mean brightness **72.5/255**,
+contrast **54.6**, dynamic range **221**, nothing dead, ~5% blown out —
+*EXCELLENT, strong detail in darkness*.
 
 ---
 
@@ -456,6 +514,7 @@ toed-in rig as well, and gives the identical answer when the rig is parallel.
 test_camera/
 ├── stream_camera.py     # single camera feed
 ├── camera_info.py       # camera properties, custom cameras, focal measurement, night test
+├── night_vision.py      # six-panel live IR viewer with recording
 ├── calibrate_stereo.py  # measure the rig -> ROS 2 config
 ├── stereo_vision.py     # three-panel live stereo
 ├── diagnose.py          # which firmware is a board actually running?
@@ -566,6 +625,10 @@ to within 1e-6 m for both parallel and toed-in rigs, disparity agreeing with
 `f·B/Z`, detection matching, config round-trips, and `Tx = -fx·B` in the
 generated `CameraInfo`.
 
+**Verified in the dark** — `camera_info.py --night` passes on both boards
+(mean 69-107/255, contrast 55-61), and `night_vision.py` renders all six views
+from live frames, with the MJPG recorder confirmed writing video.
+
 **Verified with a model flashed** — with SenseCraft's *Face Detection* on both
 boards: model metadata read and identified, class names adopted automatically,
 `--detect` streaming detections at ~21 ms inference, and the centre-origin box
@@ -580,8 +643,8 @@ checksums.
   front of both cameras to produce a triangulated reading. The maths is
   verified against synthetic frames to 1e-6 m; what remains unproven is the
   accuracy of a real measurement against a tape measure.
-- **Test 3 (night mode).** The code path runs, but no one has yet done the
-  lights-off run with an IR module attached.
+- **Fisheye night behaviour.** The night tooling has only been run with the
+  3.6 mm module.
 - **Linux and macOS.** Windows only, so far.
 - **Fisheye undistortion.** Not implemented. `distortion_coefficients` in the
   generated `CameraInfo` are all zero. For the 1.7 mm lens that is a real

@@ -30,3 +30,7 @@ snapshots/
 
 # Firmware images: download from the official releases, do not commit
 *.img
+
+# Night-vision recordings
+*.avi
+*.mp4
