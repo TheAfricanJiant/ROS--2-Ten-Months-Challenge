@@ -2,7 +2,7 @@
 
 [← Back to repository index](../../README.md)
 
-![Stereo mount](assets/images/Stereo_cameras_mount_3D_model.png)
+![Stereo mount](../../assets/images/Stereo_cameras_mount_3D_model.png)
 A Raspberry Pi 5 running ROS 2 with **two night-vision cameras** for stereo depth and **two Grove AI V2 modules** for on-module object detection, driving an **XRP** robot through **micro-ROS on an RP2040/Pico**.
 
 The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-level motor control stays on the Pico.
