@@ -5,7 +5,7 @@ A long-term ROS 2 robotics challenge documenting my progression from ROS 2 funda
   <img src="assets/images/explosion_2mb.gif" alt="Robot Fusion 360" width="800" />
 </div>
 
-![ROS 2 Ten Months Challenge](assets/images/combined_high_quality.jpg)
+<img src="assets/images/combined_high_quality.jpg" alt="ROS 2 Ten Months Challenge" width="800" />
 
 This repository is a **collection of practical ROS 2 projects**. Each project lives in its own folder under [`projects/`](projects/) with its own README, firmware, and ROS 2 workspace, so it can be read, built, and run independently.
 
