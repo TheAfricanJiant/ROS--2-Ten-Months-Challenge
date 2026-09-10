@@ -2,10 +2,23 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>tracker</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="th3kit3@todo.todo">th3kit3</maintainer>
-  <license>TODO: License declaration</license>
+  <version>0.1.0</version>
+  <description>
+    Object tracking for the XRP stereo rig. Publishes Grove Vision AI V2
+    cameras as ROS 2 topics, and turns their detections into /cmd_vel so the
+    robot follows a target. Defaults to following a human face.
+  </description>
+  <maintainer email="tambuprecious60@gmail.com">th3kit3</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>vision_msgs</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

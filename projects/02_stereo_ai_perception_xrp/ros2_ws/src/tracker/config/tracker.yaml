@@ -1,0 +1,42 @@
+# Tracker defaults. Override any of these at launch, e.g.
+#   ros2 launch tracker_launch follow.launch.py target:=person
+/**:
+  ros__parameters:
+
+    # --- what to follow -------------------------------------------------
+    target_class: face          # class name from the flashed model
+    min_score: 0.4              # ignore weaker detections
+    select: largest             # largest | best_score | centre
+
+    # --- cameras --------------------------------------------------------
+    # Ports are set by the launch file. Set focal_px from
+    # `camera_info.py --measure`; 0.0 falls back to the nominal value.
+    left_camera_key: ir-3.6mm
+    right_camera_key: ir-1.7mm
+    left_focal_px: 0.0
+    right_focal_px: 0.0
+    width: 240
+    height: 240
+    use_right_camera: true
+    steer_from: left            # the sharper lens steers better
+
+    # --- geometry -------------------------------------------------------
+    baseline_m: 0.0791          # lens centre to lens centre
+    object_height_m: 0.22       # a face; only used for monocular range
+
+    # --- control --------------------------------------------------------
+    desired_distance_m: 0.8
+    distance_tolerance_m: 0.12  # dead zone, so it does not hunt
+    angular_gain: 1.6
+    linear_gain: 0.6
+    max_angular: 1.2            # rad/s
+    max_linear: 0.25            # m/s
+    angular_deadband: 0.06      # fraction of half the field of view
+    smoothing: 3                # frames of median/mean filtering
+
+    # --- behaviour ------------------------------------------------------
+    lost_timeout: 0.7           # seconds before giving up on the target
+    search_on_lost: false       # true = spin slowly looking for it
+    search_angular: 0.4
+    rate_hz: 20.0
+    enabled: true               # false = compute everything, publish zero

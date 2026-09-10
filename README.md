@@ -45,6 +45,14 @@ This repository is a **collection of practical ROS 2 projects**. Each project li
 
 ---
 
+## 📖 Guides
+
+| Doc | What it covers |
+|-----|----------------|
+| [Workflow: Raspberry Pi ↔ Windows](docs/workflow-raspberry-windows.md) | Moving ROS 2 work off the Pi and onto GitHub over the LAN, without the Pi ever needing GitHub credentials |
+
+---
+
 ## 🔧 Tools
 
 | Tool | What it does |

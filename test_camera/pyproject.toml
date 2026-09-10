@@ -1,0 +1,29 @@
+# Makes the `sscma` driver installable, so the ROS 2 nodes on the Pi can
+# import it instead of carrying a duplicate copy:
+#
+#     pip install -e <repo>/test_camera
+#
+# The bench tools in this folder are run as scripts and are not packaged.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sscma-vision"
+version = "0.1.0"
+description = "Serial driver, camera database and stereo maths for the Grove Vision AI V2"
+requires-python = ">=3.10"
+dependencies = [
+    "pyserial>=3.5",
+    "numpy>=1.24",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# OpenCV is imported lazily, so a ROS 2 install that already has
+# python3-opencv from apt does not need it pulled in again.
+viewer = ["opencv-python>=4.8"]
+
+[tool.setuptools]
+packages = ["sscma"]

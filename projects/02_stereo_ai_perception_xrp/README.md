@@ -92,12 +92,25 @@ The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-l
 - Create perception topics
 - Combine AI detection + stereo distance
 
+> **Phase 1 is done and lives in [`firmware/`](firmware/README.md):** a
+> standalone [I2C scanner](firmware/src/i2c_scanner) that finds every device on
+> every plausible bus, and an [encoder test](firmware/src/encoder_test) that
+> counts all four motors and checks the direction matches what the motor was
+> told to do. No micro-ROS yet - prove the hardware first.
+
 ### Objective 5 — Integrate XRP with micro-ROS
 
 - ROS 2 → micro-ROS → Pico → XRP
 - Use `/cmd_vel` for movement
 - Keep low-level motor control on the Pico
 - Keep AI/stereo/decision-making on Pi 5
+
+> **Tooling:** the [ROS 2 workspace](ros2_ws/README.md) has the tracking
+> stack - one camera runs the detection model and drives `/cmd_vel`, the other
+> runs an image effect (IR palette, colour isolation, edges). Both publish to
+> `/image1` and `/image2` for Foxglove. Each camera gets its own projection
+> model, because a fisheye and an ordinary lens disagree about what a pixel
+> offset means by up to 14 degrees at the frame edge.
 
 ### Objective 6 — Test robot behaviors
 
