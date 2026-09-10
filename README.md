@@ -12,6 +12,7 @@ A long-term ROS 2 robotics challenge documenting my progression from ROS 2 funda
 This repository is a **collection of practical ROS 2 projects**. Each project lives in its own folder under [`projects/`](projects/) with its own README, firmware, and ROS 2 workspace, so it can be read, built, and run independently.
 
 ---
+- This is an ongoing project under the [Hardware Innovation Valley Community](https://hwivc.org).
 
 ## 📚 Projects
 
