@@ -5,18 +5,19 @@
 Four PlatformIO projects. The three test projects came first and **all pass on
 the robot**; the real firmware is built directly out of them.
 
-| Project | Status | What it does |
-|---------|--------|--------------|
-| [`src/i2c_scanner/`](src/i2c_scanner) | ✅ **working** | Finds every I2C device, on every plausible bus and pin pair. |
-| [`src/encoder_test/`](src/encoder_test) | ✅ **working** | Live drive control from the keyboard, encoder counts for all four motors. |
-| [`src/imu_test/`](src/imu_test) | ✅ **working** | Reads the LSM6DSO accelerometer and gyro. |
-| [`src/xrp_firmware/`](src/xrp_firmware) | ⚙️ **compiles, not yet run on the robot** | micro-ROS bridge: `/cmd_vel` in, IMU/odom/encoders out. |
+| Project | Status | What it does | UF2 File Location |
+|---------|--------|--------------|-------------------|
+| [`src/i2c_scanner/`](src/i2c_scanner) | ✅ **working** | Finds every I2C device, on every plausible bus and pin pair. | [`src/i2c_scanner/.pio/build/pico/firmware.uf2`](src/i2c_scanner/.pio/build/pico/firmware.uf2) |
+| [`src/encoder_test/`](src/encoder_test) | ✅ **working** | Live drive control from the keyboard, encoder counts for all four motors. | [`src/encoder_test/.pio/build/pico/firmware.uf2`](src/encoder_test/.pio/build/pico/firmware.uf2) |
+| [`src/imu_test/`](src/imu_test) | ✅ **working** | Reads the LSM6DSO accelerometer and gyro. | [`src/imu_test/.pio/build/pico/firmware.uf2`](src/imu_test/.pio/build/pico/firmware.uf2) |
+| [`src/xrp_firmware/`](src/xrp_firmware) | ⚙️ **ready to flash** | micro-ROS bridge: `/cmd_vel` in, IMU/odom/encoders out. | [`src/xrp_firmware/firmware.uf2`](src/xrp_firmware/firmware.uf2) *(build: `.pio/build/pico/firmware.uf2`)* |
 
 ---
 
 ## Contents
 
 - [Flashing an XRP board](#flashing-an-xrp-board)  ← no build needed
+- [Firmware file locations](#firmware-file-locations)
 - [Building it yourself](#building-it-yourself)
 - [What the tests established](#what-the-tests-established)
 - [The real firmware](#the-real-firmware)
@@ -29,14 +30,16 @@ the robot**; the real firmware is built directly out of them.
 
 ## Flashing an XRP board
 
-**You do not need to build anything.** `firmware.uf2` is committed, so the
-normal path is drag-and-drop:
+**You do not need to build anything.** `firmware.uf2` is located in [`src/xrp_firmware/`](src/xrp_firmware), so the normal path is drag-and-drop:
+
+- **Prebuilt UF2 path:** [`src/xrp_firmware/firmware.uf2`](src/xrp_firmware/firmware.uf2)
+- **Local build path (if compiled from source):** `src/xrp_firmware/.pio/build/pico/firmware.uf2`
 
 1. **Unplug** the USB cable.
 2. **Hold the BOOT button down** and keep holding it.
 3. **Plug the cable back in**, then release BOOT.
 4. A disk appears - `RPI-RP2` (RP2040) or `RP2350` (RP2350B).
-5. Copy [`src/xrp_firmware/firmware.uf2`](src/xrp_firmware) onto that disk.
+5. Copy [`src/xrp_firmware/firmware.uf2`](src/xrp_firmware/firmware.uf2) onto that disk.
 6. **The disk disappears.** That is the success signal - the board reset itself
    and is running the firmware.
 
@@ -45,8 +48,7 @@ normal path is drag-and-drop:
 
 Watch the output with `pio device monitor`, or any serial terminal at 115200.
 
-The three test projects work the same way; build them with `pio run` (they
-build natively on Windows) and copy their `.pio/build/pico/firmware.uf2`.
+The three test projects work the same way; their `.uf2` binaries are in their respective `.pio/build/pico/` folders.
 
 ---
 

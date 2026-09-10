@@ -102,6 +102,16 @@ Then build again:
 pio run
 ```
 
+### Output Binary Location
+The compiled file is created at:
+```text
+.pio/build/pico/firmware.uf2
+```
+To commit it to Git for drag-and-drop flashing:
+```bash
+cp .pio/build/pico/firmware.uf2 ./firmware.uf2
+```
+
 ---
 
 ## Build From VS Code
@@ -219,6 +229,16 @@ Build again:
 
 ```bash
 pio run
+```
+
+### Output Binary Location
+The compiled file is created at:
+```text
+.pio/build/pico/firmware.uf2
+```
+To commit it to Git for drag-and-drop flashing:
+```bash
+cp .pio/build/pico/firmware.uf2 ./firmware.uf2
 ```
 
 ---
