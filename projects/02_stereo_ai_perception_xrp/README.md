@@ -29,6 +29,17 @@ The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-l
 
 ---
 
+## 🧭 Where things are
+
+| | Guide | Covers |
+|---|-------|--------|
+| 🔌 | **[Firmware](firmware/README.md)** | Flashing the XRP (BOOT button + `.uf2`), the three working test projects, and the micro-ROS firmware with its full ROS 2 interface |
+| 🤖 | **[ROS 2 workspace](ros2_ws/README.md)** | The tracking stack: one camera drives `/cmd_vel`, the other runs image effects, both viewable in Foxglove |
+| 📷 | **[Bench tools](../../test_camera/README.md)** | Camera testing, night vision, lens measurement, stereo calibration |
+| 🔄 | **[Pi ↔ Windows workflow](../../docs/workflow-raspberry-windows.md)** | Moving ROS 2 work off the Pi and onto GitHub over the LAN |
+
+---
+
 ## 📁 Contents
 
 ```
@@ -44,7 +55,7 @@ The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-l
 
 ## 🎯 Project objectives
 
-### Objective 1 — Gather & identify components
+### Objective 1 — Gather & identify components ✅
 
 - Raspberry Pi 5
 - 2× night-vision Raspberry Pi cameras
@@ -52,7 +63,7 @@ The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-l
 - Pico/RP2040 on XRP
 - Wiring, power, mounting hardware
 
-### Objective 2 — Test cameras + Grove AI
+### Objective 2 — Test cameras + Grove AI ✅
 
 - Test both cameras in **day and night/IR**
 - Test both Grove AI modules
@@ -85,7 +96,7 @@ The split is deliberate: AI, stereo, and decision-making stay on the Pi 5; low-l
 > 240x240 with a ~79 mm baseline, one pixel of disparity is worth ~51 mm of
 > depth at 1 m and ~112 mm at 1.5 m.
 
-### Objective 4 — Integrate everything into ROS 2
+### Objective 4 — Integrate everything into ROS 2 ✅
 
 - Pi 5 receives both camera streams
 - Grove AI outputs become ROS 2 data
@@ -144,15 +155,22 @@ Everything beyond that is the next phase.
 
 ## ✅ Progress
 
-| Objective | Status |
-|-----------|--------|
-| 1 — Components gathered | ⬜ |
-| 2 — Cameras + Grove AI tested | ⬜ |
-| 3 — Stereo rig built & calibrated | ⬜ |
-| 4 — ROS 2 perception topics | ⬜ |
-| 5 — micro-ROS → XRP `/cmd_vel` | ⬜ |
-| 6 — Follow behaviors | ⬜ |
-| 7 — SLAM-ready architecture | ⬜ |
+| Objective | Status | Where |
+|-----------|--------|-------|
+| 1 — Components gathered | ✅ done | Both IR cameras, two Vision AI V2 boards, XRP, Pi 5 |
+| 2 — Cameras + Grove AI tested | ✅ done | [Bench tools](../../test_camera/README.md) — day and night, both modules, face detection running |
+| 3 — Stereo rig built & calibrated | 🔶 rig built, **calibration still to do** | [Calibration guide](../../test_camera/README.md#test-5--stereo-calibration) |
+| 4 — ROS 2 perception topics | ✅ done | [`tracker`](ros2_ws/README.md) — `/image1`, `/image2`, detections |
+| 5 — micro-ROS → XRP `/cmd_vel` | 🔶 firmware written, **not yet flashed** | [Firmware](firmware/README.md) |
+| 6 — Follow behaviors | 🔶 face following written, untested on hardware | [`tracker_node`](ros2_ws/README.md#nodes) |
+| 7 — SLAM-ready architecture | ⬜ | Needs objective 3 finished first |
+
+**Hardware bring-up is done.** The I2C scan, encoder/drive control and IMU
+tests all pass on the robot — see [what the tests
+established](firmware/README.md#what-the-tests-established) for the pinout
+corrections they turned up.
+
+**Next:** flash the micro-ROS firmware, then stereo calibration.
 
 ---
 
