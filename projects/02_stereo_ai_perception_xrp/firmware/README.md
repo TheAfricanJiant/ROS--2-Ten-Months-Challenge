@@ -21,6 +21,7 @@ the robot**; the real firmware is built directly out of them.
 - [The real firmware](#the-real-firmware)
 - [ROS 2 interface](#ros-2-interface)
 - [Bringing it up](#bringing-it-up)
+- [Troubleshooting](#troubleshooting)
 - [Status](#status)
 
 ---
@@ -278,15 +279,99 @@ so a crashed controller does not leave the robot driving.
 
 ---
 
+## Troubleshooting
+
+### `Filename too long` on Windows
+
+```
+fatal: cannot write keep file '...pack-....keep': Filename too long
+fatal: fetch-pack: invalid index-pack output
+========================= [FAILED] =========================
+```
+
+micro-ROS clones a deep tree of git repositories while building. On this repo
+the deepest path comes to **262 characters** - two over Windows' 260-character
+`MAX_PATH` limit. The error is git's, not the compiler's.
+
+**Fix, no admin needed:**
+
+```powershell
+git config --global core.longpaths true
+```
+
+Then delete the half-finished download and build again:
+
+```powershell
+cd projects\02_stereo_ai_perception_xrp\firmware\src\xrp_firmware
+Remove-Item -Recurse -Force .pio
+pio run
+```
+
+The `.pio` removal matters - the first attempt left a partially cloned
+repository behind, and a retry on top of that fails for a different reason.
+
+**If it still complains**, move the build tree somewhere short. Set these as
+environment variables rather than in `platformio.ini`, so the Pi is
+unaffected:
+
+```powershell
+$env:PLATFORMIO_LIBDEPS_DIR = "C:\pio\libdeps"
+$env:PLATFORMIO_BUILD_DIR   = "C:\pio\build"
+pio run
+```
+
+**Or enable long paths system-wide** (needs an admin PowerShell, and a
+reboot):
+
+```powershell
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+  -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
+```
+
+**Or build on the Raspberry Pi**, which has no such limit and is where the
+agent runs anyway. The least fiddly option if the Pi already has PlatformIO.
+
+> The three test projects do not hit this: they have no `lib_deps`, so nothing
+> deep gets cloned. It is specific to micro-ROS.
+
+### `board_microros_distro` mismatch
+
+The firmware and the agent must be built against the same ROS 2 distro. Check
+with `echo $ROS_DISTRO` on the Pi and set `board_microros_distro` to match. A
+mismatch usually shows up as the agent connecting but no topics appearing.
+
+### No `RPI-RP2` drive appears
+
+BOOT was released too early. It has to be held down *as the cable goes in*.
+See [Flashing an XRP board](#flashing-an-xrp-board).
+
+### Agent connects but nothing publishes
+
+Check the transport matches: `board_microros_transport = serial` in
+`platformio.ini`, and the agent started with `serial --dev /dev/ttyACM0`.
+Confirm the port with `ls /dev/ttyACM*` on the Pi.
+
+### Out of memory, or a hard fault on startup
+
+RP2040 has 256 KB of RAM and micro-ROS uses a fair share. Set
+`USE_PARAMETER_SERVER 0` in `config.h` - that drops three services and leaves
+every topic working.
+
+---
+
 ## Status
 
 **The three test projects work on the robot** — I2C scan, encoder counting and
 drive control, and IMU streaming all verified by running them.
 
-**The micro-ROS firmware is written but not yet flashed.** Its drivers are the
-tested ones, so the risky part is the ROS 2 plumbing rather than the hardware.
-Expect first-build friction around `board_microros_distro` matching your agent,
-and possibly RAM if the parameter server is left on.
+**The micro-ROS firmware is written but not yet compiled or flashed.** Its
+drivers are the tested ones, so the risky part is the ROS 2 plumbing rather
+than the hardware.
+
+The first build attempt on Windows failed on the 260-character path limit
+before compiling anything - see [Troubleshooting](#troubleshooting). That is a
+build-environment problem rather than a code one, but it does mean **ordinary
+compile errors have not been ruled out**.
 
 Not yet done: closed-loop tuning (`kp`/`ki` are starting values, not measured
 ones), and `wheel_radius_m` / `wheel_separation_m` still need measuring on the
