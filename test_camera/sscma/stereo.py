@@ -144,23 +144,53 @@ def triangulate(
     return DepthResult(x=x, y=y, z=z, disparity_px=disparity)
 
 
+def _normalised(det: Detection, camera) -> tuple[float, float, float]:
+    """Detection centre and height as angles, not pixels.
+
+    Dividing by the camera's own focal length removes the lens from the
+    numbers, so a 3.6 mm and a 1.7 mm camera looking at the same object
+    produce comparable values. Without this, mixed lenses never match: the
+    same object is roughly (3.6/1.7) = 2.1x wider in the narrower lens, which
+    is a 4.5x area ratio - past any sane size test.
+    """
+    focal = camera.resolved_focal_px()
+    cx, cy = camera.principal_point
+    centre_y = (det.y + det.height / 2.0 - cy) / focal
+    centre_x = (det.x + det.width / 2.0 - cx) / focal
+    return centre_x, centre_y, det.height / focal
+
+
 def match_detections(
     left: Sequence[Detection],
     right: Sequence[Detection],
     max_row_offset_px: float = 40.0,
+    config: StereoConfig | None = None,
+    max_row_offset_deg: float = 9.0,
+    max_size_ratio: float = 3.0,
 ) -> list[tuple[Detection, Detection]]:
     """Pair up detections that plausibly show the same object.
 
     With the cameras side by side and level, the same object lands at roughly
     the same *height* in both images, so vertical offset is the cheapest
-    discriminator. Size is used to break ties. Each detection is used once.
+    discriminator, with size breaking ties. Each detection is used once.
+
+    Pass ``config`` when the two cameras have **different lenses**. Matching
+    then happens in angular units rather than pixels, which is the only way a
+    mixed rig can work; ``max_row_offset_px`` is ignored in that mode in
+    favour of ``max_row_offset_deg``.
     """
     pairs: list[tuple[Detection, Detection]] = []
     unused_right = list(right)
 
+    angular = config is not None
+    row_limit = math.tan(math.radians(max_row_offset_deg)) if angular else max_row_offset_px
+
     for left_det in left:
-        left_cy = left_det.y + left_det.height / 2.0
-        left_area = max(1, left_det.width * left_det.height)
+        if angular:
+            _, left_row, left_size = _normalised(left_det, config.left)
+        else:
+            left_row = left_det.y + left_det.height / 2.0
+            left_size = float(max(1, left_det.height))
 
         best: Detection | None = None
         best_cost = float("inf")
@@ -169,16 +199,23 @@ def match_detections(
             if right_det.target != left_det.target:
                 continue
 
-            row_offset = abs((right_det.y + right_det.height / 2.0) - left_cy)
-            if row_offset > max_row_offset_px:
+            if angular:
+                _, right_row, right_size = _normalised(right_det, config.right)
+            else:
+                right_row = right_det.y + right_det.height / 2.0
+                right_size = float(max(1, right_det.height))
+
+            row_offset = abs(right_row - left_row)
+            if row_offset > row_limit:
                 continue
 
-            right_area = max(1, right_det.width * right_det.height)
-            ratio = max(left_area, right_area) / min(left_area, right_area)
-            if ratio > 4.0:
-                continue                # wildly different sizes: not the same thing
+            ratio = (max(left_size, right_size) / min(left_size, right_size)
+                     if min(left_size, right_size) > 0 else float("inf"))
+            if ratio > max_size_ratio:
+                continue            # too different in angular size to be one object
 
-            cost = row_offset + 8.0 * (ratio - 1.0)
+            # Normalise the row term so the two modes weigh alike.
+            cost = row_offset / max(row_limit, 1e-9) + 0.35 * (ratio - 1.0)
             if cost < best_cost:
                 best, best_cost = right_det, cost
 

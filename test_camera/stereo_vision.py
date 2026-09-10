@@ -85,7 +85,9 @@ def draw_combined(pair, config, scale, anaglyph_on):
 
     canvas = cv2.resize(base, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
 
-    matches = match_detections(pair.left.detections, pair.right.detections)
+    # Pass the config so mixed lenses match in angular units, not pixels.
+    matches = match_detections(pair.left.detections, pair.right.detections,
+                               config=config)
     results = []
 
     for left_det, right_det in matches:

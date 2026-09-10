@@ -274,6 +274,69 @@ distance, and they are aimed. If the bright region sits in a corner rather
 than where your subject is, angle the illuminators — that costs nothing and
 buys more usable range than any amount of image processing.
 
+![Face detection at night on both cameras](../assets/images/both_with_face_detection_night_2mb.gif)
+
+*Both boards running Face Detection in a dark room — the fisheye (left) taking
+in the whole scene, the 3.6 mm (right) filling the frame with one face.*
+
+### Day/night switching — and why there is no command for it
+
+```
+python camera_info.py --mode --port PORT_A --port PORT_B
+```
+
+**You cannot switch this in software.** Probing the firmware for every
+plausible control returns `Unknown command` for all of them:
+
+```
+AT+FOCUS?  AT+AF?  AT+EXPOSURE?  AT+GAIN?  AT+AGC?  AT+AEC?
+AT+BRIGHTNESS?  AT+CONTRAST?  AT+AWB?  AT+ICR?  AT+IRCUT?
+AT+LED?  AT+NIGHT?  AT+SHUTTER?  AT+VFLIP?  ...   -> all UNSUPPORTED
+```
+
+The only sensor command the firmware implements is `AT+SENSOR=<id>,<on>,<opt>`,
+which picks the resolution. Everything else — exposure, gain, white balance,
+the IR-cut filter and the illuminators — is handled on the **camera module
+itself**, by its own light sensor, and the Vision AI V2 can neither read nor
+control it.
+
+`--mode` measures the effect instead of asking. An IR-cut filter blocks
+infrared; remove it and IR floods red, green and blue about equally, so even a
+lit room comes back nearly colourless:
+
+```
+COM4: saturation   2.4%  channel spread  2.0  -> NIGHT (IR-cut removed)
+COM3: saturation  11.5%  channel spread  3.4  -> DAY (IR-cut in place)
+
+MISMATCH: these cameras are in different modes.
+```
+
+That is a real measurement from this rig, and it explains the "why is one feed
+dark in a lit room?" symptom: that camera is still in night mode, so its
+auto-exposure is fighting the IR illuminators rather than the room light.
+
+**To force a mode**, light or shade the small photo-sensor on the camera module
+(the little dome between the IR LEDs) — brighten it for day, cover it for
+night. Nothing else will do it.
+
+**For stereo, check both cameras report the same mode before calibrating.**
+One eye seeing infrared while the other does not makes the same scene look
+genuinely different to each, and matching between them gets harder.
+
+### Focus
+
+Also mechanical, also no command. These are M12 screw-mount lenses: **turn the
+lens barrel** in its holder to focus. The reliable way is to stream the feed
+and adjust while watching:
+
+```
+python stream_camera.py --port PORT
+```
+
+The 1.7 mm fisheye is the fiddly one — its depth of field is enormous once set,
+but the correct position is a narrow band, so a small turn moves you from sharp
+to useless.
+
 Sample numbers from a real run in a dark room: mean brightness **72.5/255**,
 contrast **54.6**, dynamic range **221**, nothing dead, ~5% blown out —
 *EXCELLENT, strong detail in darkness*.
@@ -307,10 +370,47 @@ python camera_info.py --measure           # measure it for real
 Also in the database, for people who own them: `rpi-v1-noir`, `rpi-v2`,
 `rpi-v2-noir`, `rpi-v3`.
 
-**Which to use for stereo:** the **3.6 mm**. It is much closer to a pinhole
-camera, which is the model every depth formula here assumes. The 1.7 mm sees a
-far wider scene but bows straight lines badly, and that distortion turns
-directly into depth error away from the image centre.
+**Which to use for stereo:** the **3.6 mm**, and ideally *two of them*. It is
+much closer to a pinhole camera, which is the model every depth formula here
+assumes. The 1.7 mm sees a far wider scene but bows straight lines badly, and
+that distortion turns directly into depth error away from the image centre.
+
+### Mixing two different lenses
+
+![The same scene through both lenses](../assets/images/fov_compare.png)
+
+*Same room, same moment, two cameras side by side. The chair fills the 3.6 mm
+frame and sits small and central in the fisheye — that is the whole difference
+between 54° and 94°, not a focus or distance problem.*
+
+A mixed rig **works**, but costs you real accuracy. Two things happen:
+
+**1. Matching breaks unless it is done in angular units.** The same object is
+2.12× taller in the 3.6 mm frame — a 4.5× area ratio — which any sensible
+size test rejects as "not the same object". So detections are normalised by
+each camera's own focal length before matching, which removes the lens from the
+comparison. Pass `config=` to `match_detections`, as `stereo_vision.py` does.
+
+**2. Depth precision drops to the level of the worse camera.** Measured, at
+1.5 m, for one pixel of error on the right eye:
+
+| Rig | Focal (px) | 1 px of disparity = |
+|-----|-----------|---------------------|
+| Two 3.6 mm | 235 / 235 | **131 mm** |
+| Two 1.7 mm | 111 / 111 | 308 mm |
+| **3.6 mm + 1.7 mm (mixed)** | 235 / 111 | **308 mm** |
+
+The mixed rig is exactly as imprecise as two fisheyes. The wide lens spreads
+the same scene over fewer pixels, so each pixel covers more angle, and depth
+error follows the *worse* of the two — the sharp camera buys you nothing.
+
+**Recommendation:** for the stereo work, use a **matching pair of 3.6 mm
+modules**. That is 2.4× better depth precision for the price of one more
+camera. Keep the fisheye for wide situational awareness on a single camera,
+where its field of view is an asset rather than a liability.
+
+If you do run mixed, keep the target near the centre of both frames — that is
+where the fisheye's distortion is smallest and where the overlap is best.
 
 **On the vendor numbers.** The gap in the fisheye row is real, not a typo. The
 `1/2.5″` on that lens is the *image circle it can cover*, not the sensor fitted
@@ -546,6 +646,9 @@ calling `imshow` — which is the whole point of building it this way.
 | "could not read model metadata" | The board did not answer `AT+INFO?`. The tools warn and try anyway — `AT+INVOKE` is the real authority. |
 | "The two boards are running different models" | Flash the same model on both from SenseCraft; the eyes cannot be matched otherwise. |
 | Night test says "black" | IR LEDs unpowered, or the camera has an IR-cut filter (check `camera_info.py --list`). |
+| Feed is dark in a lit room | The module is still in night mode. Confirm with `camera_info.py --mode`; light the photo-sensor between the IR LEDs to force day mode. No AT command can switch it. |
+| Image is blurry at every distance | Focus is mechanical — turn the M12 lens barrel while streaming. |
+| Two eyes never match, mixed lenses | `match_detections` needs `config=` to compare in angular units; `stereo_vision.py` passes it. |
 | Boxes offset down-and-right | Firmware reports corner-origin boxes: add `--box-format corner`. The default (`center`) is confirmed correct on firmware `2025.01.02`. |
 | "no object matched in both eyes" | The object is outside the overlap, or only one board has the model. |
 | Stereo distances all wrong by the same ratio | Baseline or focal length is off. Re-measure the baseline; run `camera_info.py --measure`. |
@@ -625,6 +728,12 @@ to within 1e-6 m for both parallel and toed-in rigs, disparity agreeing with
 `f·B/Z`, detection matching, config round-trips, and `Tx = -fx·B` in the
 generated `CameraInfo`.
 
+**Verified with mixed lenses** — angular matching pairs the same object across
+a 3.6 mm and a 1.7 mm camera at 0.8-3.0 m and off-centre, while still refusing
+mismatched rows, classes and sizes; exact-geometry triangulation still recovers
+known points to 1e-6 m. The per-pixel depth figures in the lens table were
+measured the same way.
+
 **Verified in the dark** — `camera_info.py --night` passes on both boards
 (mean 69-107/255, contrast 55-61), and `night_vision.py` renders all six views
 from live frames, with the MJPG recorder confirmed writing video.
@@ -643,8 +752,9 @@ checksums.
   front of both cameras to produce a triangulated reading. The maths is
   verified against synthetic frames to 1e-6 m; what remains unproven is the
   accuracy of a real measurement against a tape measure.
-- **Fisheye night behaviour.** The night tooling has only been run with the
-  3.6 mm module.
+- **A matched-lens stereo rig.** Everything is verified with one 3.6 mm and
+  one 1.7 mm, which is the harder case; a matching pair should only be
+  better.
 - **Linux and macOS.** Windows only, so far.
 - **Fisheye undistortion.** Not implemented. `distortion_coefficients` in the
   generated `CameraInfo` are all zero. For the 1.7 mm lens that is a real

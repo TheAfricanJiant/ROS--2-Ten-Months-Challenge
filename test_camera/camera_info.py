@@ -281,6 +281,80 @@ def night_check(port: str, baud: int, samples: int = 12) -> int:
     return verdict
 
 
+# --- day / night mode -----------------------------------------------------
+
+#: Below this mean saturation the image is effectively monochrome, which means
+#: infrared is reaching the sensor unfiltered.
+MONOCHROME_SATURATION_PCT = 8.0
+
+
+def mode_check(ports: list[str], baud: int, samples: int = 8) -> int:
+    """Report whether each camera's IR-cut filter is in or out.
+
+    There is no AT command for this - the filter and the illuminators are
+    driven by a light sensor on the camera module itself, which the Vision AI
+    V2 can neither read nor control. But the effect is measurable: with the
+    filter removed, infrared floods the red, green and blue channels about
+    equally, so a lit scene comes back almost colourless.
+    """
+    import numpy as np
+
+    print("\nDay / night mode")
+    print("An IR-cut filter blocks infrared. With it removed (night mode) IR")
+    print("reaches all three colour channels equally, so even a lit room looks")
+    print("nearly monochrome. That is what this measures.\n")
+
+    states = {}
+    for port in ports:
+        try:
+            with SSCMAClient(port=port, baudrate=baud) as client:
+                frames = []
+                for frame in client.stream(detect=False):
+                    frames.append(frame)
+                    if len(frames) >= samples:
+                        break
+        except SSCMAError as exc:
+            print(f"  {port}: {exc}")
+            continue
+
+        saturations, spreads = [], []
+        for frame in frames:
+            image = frame.image.astype("float32")
+            high = image.max(axis=2)
+            low = image.min(axis=2)
+            lit = high > 25
+            if lit.any():
+                saturations.append(float((((high - low) / np.maximum(high, 1))[lit]).mean() * 100))
+            means = [float(image[:, :, c].mean()) for c in range(3)]
+            spreads.append(max(means) - min(means))
+
+        if not saturations:
+            print(f"  {port}: too dark to judge - try again with the lights on")
+            continue
+
+        saturation = sum(saturations) / len(saturations)
+        spread = sum(spreads) / len(spreads)
+        night = saturation < MONOCHROME_SATURATION_PCT
+        states[port] = night
+
+        print(f"  {port}: saturation {saturation:5.1f}%  channel spread {spread:4.1f}  "
+              f"-> {'NIGHT (IR-cut removed)' if night else 'DAY (IR-cut in place)'}")
+
+    if len(states) > 1 and len(set(states.values())) > 1:
+        print("\n  MISMATCH: these cameras are in different modes.")
+        print("  For stereo that matters - one is seeing infrared and the other")
+        print("  is not, so the same scene looks different to each eye and")
+        print("  matching between them gets harder.")
+        return 1
+
+    if states:
+        print("\n  Both cameras agree." if len(states) > 1 else "")
+        print("  This switches automatically from the light sensor on the camera")
+        print("  module. To force it: light that sensor for day mode, shade it")
+        print("  for night. No AT command can do it.")
+    return 0
+
+
 # --- entry point ----------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
@@ -296,8 +370,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="Work out focal length in pixels by measurement.")
     action.add_argument("--night", action="store_true",
                         help="Check the camera still sees in darkness.")
+    action.add_argument("--mode", action="store_true",
+                        help="Report day/night (IR-cut filter) state per camera.")
 
-    parser.add_argument("--port", help=f"Serial port, e.g. {port_hint()}.")
+    parser.add_argument("--port", action="append", default=None,
+                        help=f"Serial port, e.g. {port_hint()}. Repeat for --mode.")
     parser.add_argument("--baud", type=int, default=921600)
     parser.add_argument("--widths", type=int, nargs="+", default=[240, 480, 640],
                         help="Output widths to report focal length for.")
@@ -321,7 +398,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.measure:
             return measure(args.widths)
         if args.night:
-            return night_check(args.port or find_port(), args.baud)
+            return night_check((args.port or [None])[0] or find_port(), args.baud)
+        if args.mode:
+            return mode_check(args.port or [find_port()], args.baud)
     except KeyError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
