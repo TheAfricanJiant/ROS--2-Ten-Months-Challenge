@@ -35,11 +35,16 @@
 #include <std_msgs/msg/float32_multi_array.h>
 #include <std_msgs/msg/int32_multi_array.h>
 
+/* config.h first: it defines USE_PARAMETER_SERVER, and the #if below needs
+ * that macro to already exist. Include it later and the guard silently
+ * evaluates to 0, the header never arrives, and every use of
+ * rclc_parameter_server_t further down fails to compile. */
+#include "config.h"
+
 #if USE_PARAMETER_SERVER
 #include <rclc_parameter/rclc_parameter.h>
 #endif
 
-#include "config.h"
 #include "drivetrain.h"
 #include "imu.h"
 

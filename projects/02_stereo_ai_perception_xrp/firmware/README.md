@@ -10,13 +10,14 @@ the robot**; the real firmware is built directly out of them.
 | [`src/i2c_scanner/`](src/i2c_scanner) | ✅ **working** | Finds every I2C device, on every plausible bus and pin pair. |
 | [`src/encoder_test/`](src/encoder_test) | ✅ **working** | Live drive control from the keyboard, encoder counts for all four motors. |
 | [`src/imu_test/`](src/imu_test) | ✅ **working** | Reads the LSM6DSO accelerometer and gyro. |
-| [`src/xrp_firmware/`](src/xrp_firmware) | ⚙️ **written, not flashed** | micro-ROS bridge: `/cmd_vel` in, IMU/odom/encoders out. |
+| [`src/xrp_firmware/`](src/xrp_firmware) | ⚙️ **compiles, not yet run on the robot** | micro-ROS bridge: `/cmd_vel` in, IMU/odom/encoders out. |
 
 ---
 
 ## Contents
 
-- [Flashing an XRP board](#flashing-an-xrp-board)
+- [Flashing an XRP board](#flashing-an-xrp-board)  ← no build needed
+- [Building it yourself](#building-it-yourself)
 - [What the tests established](#what-the-tests-established)
 - [The real firmware](#the-real-firmware)
 - [ROS 2 interface](#ros-2-interface)
@@ -28,37 +29,78 @@ the robot**; the real firmware is built directly out of them.
 
 ## Flashing an XRP board
 
-The RP2040 has no debug probe on this board, so flashing is done by dragging a
-file onto a USB mass-storage device the bootloader presents.
+**You do not need to build anything.** `firmware.uf2` is committed, so the
+normal path is drag-and-drop:
 
 1. **Unplug** the USB cable.
 2. **Hold the BOOT button down** and keep holding it.
 3. **Plug the cable back in**, then release BOOT.
-4. A disk appears — `RPI-RP2` (RP2040) or `RP2350` (RP2350B).
-5. Build:
-   ```bash
-   cd src/xrp_firmware
-   pio run
-   ```
-6. Copy the built firmware onto that disk:
-   ```
-   .pio/build/pico/firmware.uf2   →   the RPI-RP2 drive
-   ```
-7. **The disk disappears.** That is the success signal — the board reset
-   itself and is running your code.
+4. A disk appears - `RPI-RP2` (RP2040) or `RP2350` (RP2350B).
+5. Copy [`src/xrp_firmware/firmware.uf2`](src/xrp_firmware) onto that disk.
+6. **The disk disappears.** That is the success signal - the board reset itself
+   and is running the firmware.
 
-`pio run --target upload` does the same thing automatically once the board is
-in bootloader mode, but the manual copy is worth knowing: it works when
-PlatformIO cannot find the port, which is most of the time on Windows.
+> If the disk never appears, BOOT was released too early. It has to be held
+> down *as the cable goes in*.
 
-> If the disk does not appear, BOOT was released too early. The button must be
-> held *as the cable goes in*.
+Watch the output with `pio device monitor`, or any serial terminal at 115200.
 
-To watch the output:
+The three test projects work the same way; build them with `pio run` (they
+build natively on Windows) and copy their `.pio/build/pico/firmware.uf2`.
+
+---
+
+## Building it yourself
+
+Only needed if you change the firmware. Full instructions are in
+**[`src/xrp_firmware/build process.md`](src/xrp_firmware/build%20process.md)**.
+
+### Windows needs WSL
+
+`micro_ros_platformio` compiles the micro-ROS library from source before it
+touches your code, using shell scripts that need a POSIX shell. A native
+Windows build gets as far as:
+
+```
+Building micro-ROS dev dependencies
+Build dev micro-ROS environment failed:
+ '.' is not recognized as an internal or external command
+```
+
+That is the Unix `.` (source) builtin hitting `cmd.exe`. There is no Windows
+support in that library, so on Windows the firmware builds **inside WSL**:
 
 ```bash
-pio device monitor          # or any serial terminal at 115200
+wsl --install          # PowerShell as Administrator, once
+wsl
+cd ~ && git clone <repo> && cd <repo>/projects/02_stereo_ai_perception_xrp/firmware/src/xrp_firmware
+python3 -m pip install --user platformio
+pio run
 ```
+
+Open it from WSL with `code .` so VS Code attaches to the WSL environment -
+**not** as a normal Windows PlatformIO project.
+
+> **How the committed `.uf2` was produced:** built on a Linux machine and
+> pushed to GitHub, rather than fighting the Windows toolchain. That was
+> simply the quickest route, and it is why you can flash without building.
+
+### Linux / macOS
+
+Native, no workaround:
+
+```bash
+cd projects/02_stereo_ai_perception_xrp/firmware/src/xrp_firmware
+pio run
+```
+
+| OS | Build environment |
+|----|-------------------|
+| Windows | **WSL / Ubuntu** |
+| Linux | native |
+| macOS | native |
+
+`pio run -t clean` then `pio run` if a build goes strange.
 
 ---
 
@@ -281,58 +323,20 @@ so a crashed controller does not leave the robot driving.
 
 ## Troubleshooting
 
-### `Filename too long` on Windows
+### `'.' is not recognized as an internal or external command`
 
-```
-fatal: cannot write keep file '...pack-....keep': Filename too long
-fatal: fetch-pack: invalid index-pack output
-========================= [FAILED] =========================
-```
+A native Windows build. See [Building it yourself](#building-it-yourself) -
+use WSL, or just flash the committed `.uf2`.
 
-micro-ROS clones a deep tree of git repositories while building. On this repo
-the deepest path comes to **262 characters** - two over Windows' 260-character
-`MAX_PATH` limit. The error is git's, not the compiler's.
+### `Filename too long` during the micro-ROS download
 
-**Fix, no admin needed:**
+Windows' 260-character path limit, hit by git while it clones micro-ROS's
+dependencies. Inside WSL this cannot happen. If you are on native Windows for
+some other reason:
 
 ```powershell
 git config --global core.longpaths true
 ```
-
-Then delete the half-finished download and build again:
-
-```powershell
-cd projects\02_stereo_ai_perception_xrp\firmware\src\xrp_firmware
-Remove-Item -Recurse -Force .pio
-pio run
-```
-
-The `.pio` removal matters - the first attempt left a partially cloned
-repository behind, and a retry on top of that fails for a different reason.
-
-**If it still complains**, move the build tree somewhere short. Set these as
-environment variables rather than in `platformio.ini`, so the Pi is
-unaffected:
-
-```powershell
-$env:PLATFORMIO_LIBDEPS_DIR = "C:\pio\libdeps"
-$env:PLATFORMIO_BUILD_DIR   = "C:\pio\build"
-pio run
-```
-
-**Or enable long paths system-wide** (needs an admin PowerShell, and a
-reboot):
-
-```powershell
-New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
-  -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
-```
-
-**Or build on the Raspberry Pi**, which has no such limit and is where the
-agent runs anyway. The least fiddly option if the Pi already has PlatformIO.
-
-> The three test projects do not hit this: they have no `lib_deps`, so nothing
-> deep gets cloned. It is specific to micro-ROS.
 
 ### `board_microros_distro` mismatch
 
@@ -364,14 +368,12 @@ every topic working.
 **The three test projects work on the robot** — I2C scan, encoder counting and
 drive control, and IMU streaming all verified by running them.
 
-**The micro-ROS firmware is written but not yet compiled or flashed.** Its
-drivers are the tested ones, so the risky part is the ROS 2 plumbing rather
-than the hardware.
+**The micro-ROS firmware compiles**, built on Linux; `firmware.uf2` is
+committed so it can be flashed without a toolchain. Its drivers are the tested
+ones, so the remaining risk is the ROS 2 plumbing rather than the hardware.
 
-The first build attempt on Windows failed on the 260-character path limit
-before compiling anything - see [Troubleshooting](#troubleshooting). That is a
-build-environment problem rather than a code one, but it does mean **ordinary
-compile errors have not been ruled out**.
+**Not yet run on the robot.** Topic behaviour, odometry scaling and the
+closed-loop gains are all unverified against hardware.
 
 Not yet done: closed-loop tuning (`kp`/`ki` are starting values, not measured
 ones), and `wheel_radius_m` / `wheel_separation_m` still need measuring on the
