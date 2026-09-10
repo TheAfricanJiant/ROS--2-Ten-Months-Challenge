@@ -37,6 +37,17 @@ from sscma.config import CameraConfig, StereoConfig
 from camera_info import ask, ask_choice, ask_float, ask_yes_no
 
 
+#: Measured frame periods, so the sync tolerance matches reality. Bigger
+#: frames take longer over serial, so the two boards drift further apart.
+#: 240x240 runs ~13.7 fps (73 ms), 640x480 ~6.1 fps (164 ms).
+SKEW_BY_WIDTH = {240: 80.0, 480: 120.0, 640: 170.0}
+
+
+def default_skew(width: int) -> float:
+    """Tolerance a bit above one frame period for this resolution."""
+    return SKEW_BY_WIDTH.get(width, 80.0)
+
+
 def probe_ports() -> list[tuple[str, str | None, str | None]]:
     """Every candidate port, with the board name if it answers."""
     found = []
@@ -169,7 +180,7 @@ def build_interactive(args) -> StereoConfig:
                            image_width=width, image_height=args.height),
         baseline_m=baseline,
         convergence_deg=convergence,
-        max_sync_skew_ms=args.max_skew,
+        max_sync_skew_ms=args.max_skew or default_skew(width),
         object_height_m=object_height,
         notes=notes,
     )
@@ -188,6 +199,7 @@ def report(config: StereoConfig) -> None:
     print(f"  focal length        {focal:.1f} px "
           f"({'measured' if config.left.focal_px else 'nominal'})")
     print(f"  image               {config.left.image_width}x{config.left.image_height}")
+    print(f"  sync tolerance      {config.max_sync_skew_ms:.0f} ms")
 
     near = config.min_measurable_distance_m()
     far = config.max_measurable_distance_m()
@@ -218,8 +230,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Total toe-in angle in degrees (0 = parallel).")
     parser.add_argument("--width", type=int, default=240, help="Frame width.")
     parser.add_argument("--height", type=int, default=240, help="Frame height.")
-    parser.add_argument("--max-skew", type=float, default=60.0,
-                        help="Largest tolerable gap between paired frames (ms).")
+    parser.add_argument("--max-skew", type=float, default=None,
+                        help="Largest tolerable gap between paired frames (ms). "
+                             "Defaults to about one frame period for the chosen "
+                             "resolution, since bigger frames arrive slower.")
     parser.add_argument("--output", type=Path, default=Path("stereo_config.yaml"))
     parser.add_argument("--camera-info-dir", type=Path, default=Path("."),
                         help="Where to write left.yaml / right.yaml.")
@@ -237,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
                                    image_width=args.width, image_height=args.height),
                 baseline_m=args.baseline,
                 convergence_deg=args.convergence or 0.0,
-                max_sync_skew_ms=args.max_skew,
+                max_sync_skew_ms=args.max_skew or default_skew(args.width),
             )
         else:
             config = build_interactive(args)

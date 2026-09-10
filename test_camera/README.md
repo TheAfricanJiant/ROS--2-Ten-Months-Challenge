@@ -404,13 +404,68 @@ The mixed rig is exactly as imprecise as two fisheyes. The wide lens spreads
 the same scene over fewer pixels, so each pixel covers more angle, and depth
 error follows the *worse* of the two — the sharp camera buys you nothing.
 
-**Recommendation:** for the stereo work, use a **matching pair of 3.6 mm
-modules**. That is 2.4× better depth precision for the price of one more
-camera. Keep the fisheye for wide situational awareness on a single camera,
-where its field of view is an asset rather than a liability.
+A matching pair of 3.6 mm modules would be better, but a mixed rig is
+perfectly workable — it just needs the software to pull its weight.
 
-If you do run mixed, keep the target near the centre of both frames — that is
-where the fisheye's distortion is smallest and where the overlap is best.
+### Making a mixed rig work
+
+Three changes, in order of what they buy. All measured on this rig.
+
+**1. Run both cameras at 640×480** (`--resolution 2`). The fisheye's focal
+length goes from 111 px to 296 px, and depth error scales as 1/f:
+
+| Resolution | Fisheye focal | 1 px of error at 1.5 m |
+|-----------|---------------|------------------------|
+| 240×240 | 111 px | 308 mm |
+| **640×480** | **296 px** | **103 mm** |
+
+Costs frame rate: 13.7 fps drops to 6.1. Calibrate at the resolution you will
+actually run, because the focal lengths in the config depend on it.
+
+**2. Let the code match image content, not bounding boxes** (on by default).
+Detection boxes wobble by a few pixels between frames, and on a short baseline
+that wobble dominates every other error. So instead of trusting the box, the
+left patch is rescaled to the right camera's angular scale, correlated against
+the right image, and the correlation peak fitted with a parabola for a
+fractional-pixel position.
+
+Benchmarked over 160 random depths from 0.7–3.2 m, against box centres:
+
+| Box jitter | Box centres (RMS) | Sub-pixel (RMS) | Gain |
+|-----------|-------------------|-----------------|------|
+| 0 px (unrealistic) | 61 mm | 82 mm | 0.75× |
+| 1 px | 317 mm | **82 mm** | **3.9×** |
+| 2 px | 637 mm | **82 mm** | **7.8×** |
+| 3 px | 997 mm | **82 mm** | **12.1×** |
+
+The refined error does not move. That is the point: it locks onto the picture,
+so it does not care how the box jitters. With perfect boxes it is slightly
+worse than using them directly — the rescaling costs a little accuracy — but
+perfect boxes do not exist.
+
+It refuses rather than guesses when there is nothing to lock onto: a patch with
+too little texture, or a correlation score below 0.35, falls back to the box
+centre and the readout drops the `sub-px` tag.
+
+**3. Widen the baseline if the mount allows.** Depth error scales as 1/B, so
+79 mm → 150 mm is very nearly a 2× improvement, for free. Re-measure and
+re-run `calibrate_stereo.py` after moving anything.
+
+Together, at 1.5 m: **308 mm → about 24 mm**, and a 5-frame median filter
+(`--smooth`) damps what is left.
+
+### What code cannot fix
+
+- **Overlap.** Only the middle ~54° of the fisheye's 94° view is shared with
+  the 3.6 mm camera. Outside it there is nothing to triangulate, and the HUD
+  will say so. Aim both cameras at the same place.
+- **Fisheye distortion.** Away from the image centre the pinhole model breaks
+  down and depth drifts. Keep the target reasonably central, or run a
+  checkerboard calibration and fill in the distortion coefficients.
+- **Synchronisation.** Bigger frames arrive slower, so 640×480 pushes skew from
+  ~47 ms to ~72 ms. `calibrate_stereo.py` now sets the tolerance from the
+  resolution automatically (170 ms at 640×480); with the old fixed 60 ms every
+  pair would have been rejected. Keep motion slow.
 
 **On the vendor numbers.** The gap in the fisheye row is real, not a typo. The
 `1/2.5″` on that lens is the *image circle it can cover*, not the sensor fitted
@@ -542,6 +597,11 @@ metadata **checksums are compared**. Different models on the two eyes is a hard
 error, because detections cannot be matched between eyes that disagree about
 what they are looking at.
 
+Distances marked `sub-px` were refined by image matching; ones without fell
+back to the bounding-box centre and are much noisier. `--no-refine` turns
+refinement off for comparison, and `--smooth N` sets the median filter width
+(default 5, `1` disables).
+
 `--no-detect` streams both feeds with no model and no depth, which is a useful
 way to check the two cameras are both alive and roughly aligned before you
 worry about detections.
@@ -652,7 +712,8 @@ calling `imshow` — which is the whole point of building it this way.
 | Boxes offset down-and-right | Firmware reports corner-origin boxes: add `--box-format corner`. The default (`center`) is confirmed correct on firmware `2025.01.02`. |
 | "no object matched in both eyes" | The object is outside the overlap, or only one board has the model. |
 | Stereo distances all wrong by the same ratio | Baseline or focal length is off. Re-measure the baseline; run `camera_info.py --measure`. |
-| Stereo distances jump around | Poor sync (check the HUD skew), or the object is at the range limit where one pixel is worth a lot of depth. |
+| Stereo distances jump around | Poor sync (check the HUD skew), or the object is at the range limit. Check the readout says `sub-px`; if not, the patch has too little texture to match and it is falling back to the jittery box centre. |
+| "No synchronised pair in Ns" at 640x480 | Frames arrive slower, so skew grows. Re-run `calibrate_stereo.py` at that resolution so the tolerance is set correctly. |
 
 ---
 
@@ -728,6 +789,11 @@ to within 1e-6 m for both parallel and toed-in rigs, disparity agreeing with
 `f·B/Z`, detection matching, config round-trips, and `Tx = -fx·B` in the
 generated `CameraInfo`.
 
+**Verified at 640x480 on hardware** — both boards driven to 640x480 from the
+config, 6.2 synchronised pairs/s, measured skew ~72 ms. Sub-pixel refinement
+benchmarked over 160 random depths against known geometry, including its
+refusal behaviour on textureless patches.
+
 **Verified with mixed lenses** — angular matching pairs the same object across
 a 3.6 mm and a 1.7 mm camera at 0.8-3.0 m and off-centre, while still refusing
 mismatched rows, classes and sizes; exact-geometry triangulation still recovers
@@ -752,6 +818,9 @@ checksums.
   front of both cameras to produce a triangulated reading. The maths is
   verified against synthetic frames to 1e-6 m; what remains unproven is the
   accuracy of a real measurement against a tape measure.
+- **A real triangulated distance against a tape measure.** Capture, pairing,
+  matching, sub-pixel refinement and 640x480 operation all run on the two
+  boards; the accuracy figures come from synthetic scenes with known geometry.
 - **A matched-lens stereo rig.** Everything is verified with one 3.6 mm and
   one 1.7 mm, which is the harder case; a matching pair should only be
   better.

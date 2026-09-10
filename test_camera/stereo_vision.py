@@ -29,7 +29,8 @@ import numpy as np
 from sscma import SSCMAClient, SSCMAError, Viewer
 from sscma.cameras import distance_from_height, load_custom_cameras, CUSTOM_CAMERAS_FILE
 from sscma.config import StereoConfig, load_config
-from sscma.stereo import StereoCapture, match_detections, triangulate
+from sscma.stereo import (DepthResult, DepthSmoother, StereoCapture,
+                          match_detections, refine_match, triangulate)
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 COLOR_LEFT = (255, 200, 0)      # BGR cyan-ish
@@ -67,7 +68,11 @@ def draw_eye(frame, config_side, object_height_m, scale, color, title):
     return canvas
 
 
-def draw_combined(pair, config, scale, anaglyph_on):
+#: Sensor option ids by output width, so the config can drive the hardware.
+RESOLUTION_BY_WIDTH = {240: 0, 480: 1, 640: 2}
+
+
+def draw_combined(pair, config, scale, anaglyph_on, refine=True, smoother=None):
     """The wide panel: both eyes overlaid, with triangulated distances."""
     left_img, right_img = pair.left.image, pair.right.image
     if right_img.shape[:2] != left_img.shape[:2]:
@@ -90,14 +95,34 @@ def draw_combined(pair, config, scale, anaglyph_on):
                                config=config)
     results = []
 
-    for left_det, right_det in matches:
+    for index, (left_det, right_det) in enumerate(matches):
         left_c = (left_det.x + left_det.width / 2.0, left_det.y + left_det.height / 2.0)
         right_c = (right_det.x + right_det.width / 2.0, right_det.y + right_det.height / 2.0)
+
+        # Bounding boxes wobble by several pixels between frames, and on a
+        # short baseline that wobble dwarfs everything else. Correlating the
+        # image content instead pins the object down to a fraction of a pixel
+        # and is immune to how the box jitters.
+        exact = False
+        if refine:
+            better = refine_match(pair.left.image, pair.right.image,
+                                  left_det, right_det, config)
+            if better is not None:
+                right_c = (better[0], better[1])
+                exact = True
 
         depth = triangulate(left_c, right_c, config)
         if depth is None:
             continue
-        results.append((left_det, depth))
+
+        if smoother is not None:
+            steady = smoother.update(index, depth.distance_m)
+            depth = DepthResult(x=depth.x, y=depth.y, z=depth.z,
+                                disparity_px=depth.disparity_px)
+        else:
+            steady = depth.distance_m
+
+        results.append((left_det, depth, steady, exact))
 
         lx, ly = int(left_c[0] * scale), int(left_c[1] * scale)
         rx, ry = int(right_c[0] * scale), int(right_c[1] * scale)
@@ -113,7 +138,8 @@ def draw_combined(pair, config, scale, anaglyph_on):
         h = int(left_det.height * scale)
         cv2.rectangle(canvas, (x, y), (x + w, y + h), COLOR_DEPTH, 2)
         label(canvas,
-              f"{left_det.label}  {depth.distance_m:.2f} m  (d={depth.disparity_px:.1f}px)",
+              f"{left_det.label}  {steady:.2f} m  (d={depth.disparity_px:.1f}px"
+              f"{', sub-px' if exact else ''})",
               (x + 3, max(14, y - 6)), COLOR_DEPTH, scale=0.5)
 
     return canvas, results
@@ -210,6 +236,22 @@ def run(args) -> int:
                     "the same model. Flash the same one from SenseCraft AI."
                 )
 
+        # Drive the sensors to the resolution this config was calibrated at,
+        # or every focal length in it is wrong.
+        for side, client, cam in (("left", left_client, config.left),
+                                  ("right", right_client, config.right)):
+            opt = RESOLUTION_BY_WIDTH.get(cam.image_width)
+            if opt is None:
+                print(f"  warning: no sensor option for {cam.image_width}px wide")
+                continue
+            client.set_resolution(opt)
+            print(f"  {side}: sensor set to option {opt} "
+                  f"({cam.image_width}x{cam.image_height})")
+
+        smoother = DepthSmoother(args.smooth) if args.smooth > 1 else None
+        if args.refine:
+            print("  sub-pixel matching on (--no-refine to disable)")
+
         capture = StereoCapture(
             left_client, right_client,
             max_skew_ms=config.max_sync_skew_ms,
@@ -239,7 +281,8 @@ def run(args) -> int:
                                        args.scale, COLOR_RIGHT, "RIGHT")
                 combined, results = draw_combined(
                     pair, config, args.scale * args.combined_scale,
-                    anaglyph_on and overlays_on)
+                    anaglyph_on and overlays_on,
+                    refine=args.refine, smoother=smoother)
 
                 fps = 0.0
                 if len(fps_times) > 1 and fps_times[-1] > fps_times[0]:
@@ -251,9 +294,10 @@ def run(args) -> int:
                     f"(avg {mean_skew:5.1f})    baseline {config.baseline_m*1000:.0f} mm",
                 ]
                 if results:
-                    nearest = min(results, key=lambda r: r[1].distance_m)
-                    hud.append(f"nearest: {nearest[0].label} at "
-                               f"{nearest[1].distance_m:.2f} m")
+                    nearest = min(results, key=lambda r: r[2])
+                    refined_n = sum(1 for r in results if r[3])
+                    hud.append(f"nearest: {nearest[0].label} at {nearest[2]:.2f} m"
+                               f"   ({refined_n}/{len(results)} sub-pixel matched)")
                 elif args.detect:
                     hud.append("no object matched in both eyes - "
                                "it must be visible to BOTH cameras")
@@ -303,6 +347,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="Upscale for the two camera panels.")
     parser.add_argument("--combined-scale", type=float, default=1.6,
                         help="Extra upscale for the combined panel.")
+    parser.add_argument("--no-refine", dest="refine", action="store_false",
+                        help="Use raw bounding-box centres instead of sub-pixel "
+                             "image matching. Much noisier; for comparison only.")
+    parser.add_argument("--smooth", type=int, default=5, metavar="N",
+                        help="Median-filter depth over N frames (1 disables).")
     parser.add_argument("--no-detect", dest="detect", action="store_false",
                         help="Stream both feeds without a model; no depth.")
     parser.add_argument("--box-format", choices=("center", "corner"), default="center")

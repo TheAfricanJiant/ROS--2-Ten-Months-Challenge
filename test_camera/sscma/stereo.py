@@ -226,6 +226,147 @@ def match_detections(
     return pairs
 
 
+def refine_match(
+    left_image,
+    right_image,
+    left_det: Detection,
+    right_det: Detection,
+    config: StereoConfig,
+    search_px: float = 28.0,
+    min_score: float = 0.35,
+) -> tuple[float, float, float] | None:
+    """Locate the object in the right image to sub-pixel accuracy.
+
+    The model reports bounding boxes as whole pixels, and on a short baseline
+    one pixel of disparity is worth a lot of depth - 308 mm at 1.5 m on a
+    240x240 fisheye. Matching the actual image content instead of the box
+    corners removes most of that quantisation.
+
+    The left patch is rescaled by ``f_right / f_left`` first, so a rig with two
+    different lenses can still be correlated: without that the two patches are
+    at different angular scales and never line up. The correlation peak is then
+    fitted with a parabola to get a fractional-pixel position.
+
+    Returns ``(x, y, score)`` in right-image pixels, or None when the match is
+    too weak to trust - in which case the caller should fall back to the box
+    centre.
+    """
+    import cv2
+    import numpy as np
+
+    focal_left = config.left.resolved_focal_px()
+    focal_right = config.right.resolved_focal_px()
+    if focal_left <= 0 or focal_right <= 0:
+        return None
+    scale = focal_right / focal_left
+
+    left_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY) if left_image.ndim == 3 else left_image
+    right_gray = cv2.cvtColor(right_image, cv2.COLOR_BGR2GRAY) if right_image.ndim == 3 else right_image
+
+    # Take a patch a little tighter than the box: box edges tend to sit on
+    # background, which correlates poorly.
+    cx = left_det.x + left_det.width / 2.0
+    cy = left_det.y + left_det.height / 2.0
+    half = max(6.0, 0.40 * min(left_det.width, left_det.height))
+
+    x0, x1 = int(round(cx - half)), int(round(cx + half))
+    y0, y1 = int(round(cy - half)), int(round(cy + half))
+    x0, y0 = max(0, x0), max(0, y0)
+    x1 = min(left_gray.shape[1], x1)
+    y1 = min(left_gray.shape[0], y1)
+    if x1 - x0 < 6 or y1 - y0 < 6:
+        return None
+
+    patch = left_gray[y0:y1, x0:x1]
+
+    # A flat patch correlates perfectly with anything, so it would happily
+    # "match" empty wall. Refuse to guess when there is nothing to lock onto.
+    if float(patch.std()) < 6.0:
+        return None
+
+    # Bring the left patch to the right camera's angular scale, and upsample
+    # both by the same factor. Correlating at higher resolution is what makes
+    # the parabolic peak fit worth anything - at native scale the peak is only
+    # a few pixels wide.
+    upsample = 4
+    new_w = max(8, int(round(patch.shape[1] * scale * upsample)))
+    new_h = max(8, int(round(patch.shape[0] * scale * upsample)))
+    patch = cv2.resize(patch, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
+    # Search a band around where the right camera already thinks it is. The
+    # rig is level, so the vertical uncertainty is much smaller than the
+    # horizontal one.
+    pred_x = right_det.x + right_det.width / 2.0
+    pred_y = right_det.y + right_det.height / 2.0
+    pad_x = search_px + patch.shape[1] / (2.0 * upsample)
+    pad_y = 10.0 + patch.shape[0] / (2.0 * upsample)
+
+    sx0 = max(0, int(round(pred_x - pad_x)))
+    sy0 = max(0, int(round(pred_y - pad_y)))
+    sx1 = min(right_gray.shape[1], int(round(pred_x + pad_x)))
+    sy1 = min(right_gray.shape[0], int(round(pred_y + pad_y)))
+    window = right_gray[sy0:sy1, sx0:sx1]
+    if window.size == 0 or float(window.std()) < 4.0:
+        return None
+
+    window = cv2.resize(window, (window.shape[1] * upsample, window.shape[0] * upsample),
+                        interpolation=cv2.INTER_CUBIC)
+    if window.shape[0] < patch.shape[0] or window.shape[1] < patch.shape[1]:
+        return None
+
+    surface = cv2.matchTemplate(window, patch, cv2.TM_CCOEFF_NORMED)
+    _, best, _, best_loc = cv2.minMaxLoc(surface)
+    if not np.isfinite(best) or best < min_score:
+        return None
+
+    px, py = float(best_loc[0]), float(best_loc[1])
+
+    # Parabolic interpolation through the correlation peak, per axis. This is
+    # where the sub-pixel accuracy actually comes from.
+    for axis in (0, 1):
+        index = int(best_loc[axis])
+        limit = surface.shape[1 - axis] - 1
+        if 0 < index < limit:
+            if axis == 0:
+                a, b, c = (float(surface[int(best_loc[1]), index + d]) for d in (-1, 0, 1))
+            else:
+                a, b, c = (float(surface[index + d, int(best_loc[0])]) for d in (-1, 0, 1))
+            denom = a - 2.0 * b + c
+            if abs(denom) > 1e-9:
+                offset = 0.5 * (a - c) / denom
+                if -1.0 < offset < 1.0:
+                    if axis == 0:
+                        px += offset
+                    else:
+                        py += offset
+
+    # Back out of the upsampled window into right-image pixels.
+    return (sx0 + (px + patch.shape[1] / 2.0) / upsample,
+            sy0 + (py + patch.shape[0] / 2.0) / upsample,
+            float(best))
+
+
+class DepthSmoother:
+    """Median of the last few readings, to damp per-frame jitter.
+
+    Depth from short-baseline stereo is noisy frame to frame. A median is used
+    rather than a mean because it ignores the occasional wild mismatch instead
+    of being dragged by it.
+    """
+
+    def __init__(self, window: int = 5) -> None:
+        self.window = max(1, window)
+        self._by_key: dict[int, deque] = {}
+
+    def update(self, key: int, value: float) -> float:
+        history = self._by_key.setdefault(key, deque(maxlen=self.window))
+        history.append(value)
+        return sorted(history)[len(history) // 2]
+
+    def reset(self) -> None:
+        self._by_key.clear()
+
+
 class StereoCapture:
     """Streams both boards concurrently and yields time-matched pairs."""
 
