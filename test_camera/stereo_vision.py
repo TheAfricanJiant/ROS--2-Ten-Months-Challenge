@@ -350,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-refine", dest="refine", action="store_false",
                         help="Use raw bounding-box centres instead of sub-pixel "
                              "image matching. Much noisier; for comparison only.")
-    parser.add_argument("--smooth", type=int, default=5, metavar="N",
+    parser.add_argument("--smooth", type=int, default=3, metavar="N",
                         help="Median-filter depth over N frames (1 disables).")
     parser.add_argument("--no-detect", dest="detect", action="store_false",
                         help="Stream both feeds without a model; no depth.")

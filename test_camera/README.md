@@ -3,38 +3,100 @@
 [← Back to repository index](../README.md)
 
 Bench tooling for [Project 02](../projects/02_stereo_ai_perception_xrp/README.md),
-Objectives 2 and 3: prove the cameras and the Grove Vision AI V2 modules work,
-in daylight **and** in the dark, then measure the stereo rig and get a depth
-reading out of it — all before any of it is wired into ROS 2.
-
-The tests build on each other, so work through them in order:
-
-| # | Test | What it proves |
-|---|------|----------------|
-| 1 | [SenseCraft AI](#test-1--sensecraft-ai) | The board is alive and a detection model is loaded |
-| 2 | [Live camera feed](#test-2--live-camera-feed) | Frames actually reach your computer |
-| 3 | [Night mode](#test-3--night-mode) | The IR illumination works, and you can see what it sees |
-| 4 | [Camera properties](#test-4--camera-properties) | You know your lens's real focal length |
-| 5 | [Stereo calibration](#test-5--stereo-calibration) | The rig is measured, and ROS 2 can load it |
-| 6 | [Stereo vision](#test-6--stereo-vision) | Two eyes agree on how far away something is |
+Objectives 2 and 3. Get two Grove Vision AI V2 boards proven, measured and
+producing a depth reading — before any of it touches ROS 2.
 
 ---
 
-## Platform support
+## Quick start
+
+Four steps from nothing to a live stereo distance:
+
+```bash
+# 1. Load the SAME detection model on BOTH boards, from SenseCraft AI (browser)
+# 2. Measure each lens's real focal length
+python camera_info.py --measure
+
+# 3. Measure the rig and write the ROS 2 config
+python calibrate_stereo.py
+
+# 4. Run stereo
+python stereo_vision.py --config stereo_config.yaml
+```
+
+Everything else on this page is setup, a test to confirm a step worked, or
+reference material.
+
+---
+
+## Command reference
+
+### Setup and diagnosis
+
+| Command | What it does |
+|---------|--------------|
+| `python stream_camera.py --list-ports` | List serial ports, with each board's stable `SER=` id. |
+| `python diagnose.py [PORT]` | Which firmware a board is actually running. Run this when a board produces nothing. |
+| `python flash_firmware.py --image FILE.img --port PORT --dry-run` | Enter the bootloader and confirm it will accept a flash. Writes nothing. |
+| `python flash_firmware.py --image FILE.img --port PORT` | Reflash a board stuck on the wrong firmware. |
+| `python stream_camera.py --info [--port PORT]` | Identity, camera, resolutions, and the flashed model with its class names. |
+
+### Cameras and lenses
+
+| Command | What it does |
+|---------|--------------|
+| `python camera_info.py --list` | Every known camera, with focal length and field of view. |
+| `python camera_info.py --show KEY` | One camera in detail (`ir-3.6mm`, `ir-1.7mm`, `rpi-v1`, …). |
+| `python camera_info.py --add` | Describe a camera not in the list; saved to `custom_cameras.yaml`. |
+| **`python camera_info.py --measure`** | **Measure real focal length in pixels. Do this before trusting any distance.** |
+| `python camera_info.py --mode --port A --port B` | Day or night mode (IR-cut state) per camera, and whether they agree. |
+
+### The main path
+
+| Command | What it does |
+|---------|--------------|
+| **`python calibrate_stereo.py`** | **Measure the rig; writes `stereo_config.yaml` + ROS 2 `left.yaml`/`right.yaml`.** |
+| `python calibrate_stereo.py --left PORT --right PORT --baseline 0.079` | Same, non-interactive. |
+| **`python stereo_vision.py --config stereo_config.yaml`** | **Live stereo: both eyes plus the triangulated distance.** |
+| `python stereo_vision.py --config ... --no-detect` | Both feeds, no model, no depth. Checks the cameras are aligned. |
+
+### Testing and demos — optional
+
+None of these are required to get depth working.
+
+| Command | What it does |
+|---------|--------------|
+| `python stream_camera.py [--port PORT]` | One camera, live. Use it to focus a lens by hand. |
+| `python stream_camera.py --detect` | One camera with the model's boxes drawn. |
+| `python camera_info.py --night --port PORT` | Pass/fail: does this camera still see with the lights off? |
+| `python night_vision.py --port PORT` | Six-view IR viewer. A demo, not a step. |
+| `python night_vision.py --port PORT --detect --record out.avi` | The same, with detections, recording to video. |
+
+### Useful flags
+
+| Flag | Applies to | Meaning |
+|------|-----------|---------|
+| `--port PORT` | most | Serial port. Omitted, the tool asks each port who it is and picks the board that answers. |
+| `--resolution 0\|1\|2` | `stream_camera`, `night_vision` | 240×240 / 480×480 / 640×480. |
+| `--detect` | `stream_camera`, `night_vision` | Run the flashed model. Needs a model loaded. |
+| `--scale N` | viewers | Upscale the preview. |
+| `--no-refine` | `stereo_vision` | Use raw box centres instead of sub-pixel matching. Much noisier; comparison only. |
+| `--smooth N` | `stereo_vision` | Median-filter depth over N frames (default 3, `1` disables). |
+| `--box-format corner` | anywhere with `--detect` | If boxes land down-and-right of the object. Default `center` is correct on firmware `2025.01.02`. |
+
+Keys in any viewer: `q`/`Esc` quit, `s` snapshot, `d` toggle overlays.
+`night_vision` adds `p` palette, `r` record, `1`–`6` focus a panel, `0` grid.
+`stereo_vision` adds `a` to toggle the anaglyph.
+
+---
+
+## Setup
 
 | OS | Status |
 |----|--------|
 | **Windows 11** | **Tested.** Everything here was developed and run on Windows. |
-| **Linux** | **Not tested.** Should work — nothing is Windows-specific — but no one has run it. |
+| **Linux** | **Not tested.** Nothing is Windows-specific, but no one has run it. |
 | **macOS** | **Not tested.** Same. |
-
-The code itself is platform-neutral: ports are discovered through `pyserial`,
-paths through `pathlib`, and error messages adapt to the OS you are on. The
-Linux and macOS instructions below are written from the documented behaviour of
-those tools, not from a machine anyone has run them on. If you try them,
-corrections are welcome.
-
-### Install
 
 <table>
 <tr><th>Windows</th><th>Linux</th><th>macOS</th></tr>
@@ -48,10 +110,7 @@ pip install -r requirements.txt
 ```
 
 If PowerShell blocks activation:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
 
 </td><td>
 
@@ -63,11 +122,8 @@ pip install -r requirements.txt
 ```
 
 Serial access needs group membership:
-
-```bash
-sudo usermod -a -G dialout $USER
-# log out and back in
-```
+`sudo usermod -a -G dialout $USER`
+then log out and back in.
 
 </td><td>
 
@@ -78,620 +134,328 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-The boards use a WCH CH343 bridge. Recent macOS has a driver built in; older
+The boards use a WCH CH343 bridge. Recent macOS has the driver; older
 versions need WCH's.
 
 </td></tr>
 </table>
 
-### Finding your serial port
-
-Every command below takes `--port`. Leave it out and the tool asks each port
-who it is and picks the board that answers — which also means it will not grab
-the wrong board when two are plugged in.
-
-| OS | Ports look like | List them |
-|----|-----------------|-----------|
-| Windows | `COM3`, `COM4` | `python stream_camera.py --list-ports` |
-| Linux | `/dev/ttyACM0`, `/dev/ttyUSB0` | same, or `ls /dev/ttyACM* /dev/ttyUSB*` |
-| macOS | `/dev/cu.wchusbserial*` | same, or `ls /dev/cu.*` |
-
-Examples in this README use `PORT` as a placeholder. Substitute whatever your
-OS calls it.
+Ports are `COM3` on Windows, `/dev/ttyACM0` on Linux, `/dev/cu.wchusbserial*`
+on macOS. This page writes `PORT` as a placeholder.
 
 ---
 
-## Test 1 — SenseCraft AI
+## Step 1 — Load a model
 
-**Start here.** This is Seeed's web tool: it talks to the board over Web
-Serial, confirms it is alive, and — the part everything later depends on —
-**loads a detection model onto it**. Without a model the board returns pictures
-but no detections, and stereo depth has nothing to triangulate.
+Everything downstream needs one. Without a model the boards return pictures but
+no detections, and stereo has nothing to triangulate.
 
 ![SenseCraft AI model library](../assets/images/senseCraft.jpg)
 
 1. Open [SenseCraft AI](https://sensecraft.seeed.cc/ai/model) in **Chrome or
-   Edge** (Web Serial does not exist in Firefox or Safari).
-2. Connect the board by USB-C, choose **Grove Vision AI V2**, and connect.
-3. Pick a **Detection** model — filter by task *Detection* and device
-   *Grove - Vision AI V2*. **Face Detection** or **Gesture Detection** are good
-   first choices; both are Swift-YOLO models that run on this hardware.
-4. Flash it, and watch the preview. You should see boxes drawn on the live
-   image.
+   Edge** — Web Serial does not exist in Firefox or Safari.
+2. Connect the board, choose **Grove Vision AI V2**.
+3. Pick a **Detection** model — *Face Detection* is a good first choice.
+4. **Repeat on the second board with the same model.** The two eyes must agree
+   on what they are looking at. `stereo_vision.py` compares the model
+   checksums and refuses to run on a mismatch.
 
-> **For stereo, load the _same_ model on _both_ boards.** The two eyes have to
-> agree on what they are looking at before anything can be matched between
-> them.
+**Close the SenseCraft tab afterwards.** It holds the serial port open and
+every other tool then fails with *access denied*.
 
-**Close the SenseCraft tab before running anything else.** It holds the serial
-port open even after you navigate away, and every other tool will then fail
-with *access denied*. This catches people out constantly.
-
-<details>
-<summary>If SenseCraft refuses to connect</summary>
-
-Its connect flow waits for the board's SSCMA handshake, so a board running the
-wrong firmware can never get past this screen — and SenseCraft cannot fix that,
-because the fix needs the firmware that is missing. Diagnose it instead:
-
-```
-python diagnose.py
-```
-
-See [Recovering a board](#recovering-a-board-that-never-sees-a-camera).
-</details>
-
----
-
-## Test 2 — Live camera feed
-
-Now get frames onto your own machine, outside the browser.
-
-```
-python stream_camera.py --list-ports     # what is plugged in
-python stream_camera.py --info           # identity, cameras, model slots
-python stream_camera.py                  # plain camera feed
-python stream_camera.py --detect         # feed + the model's boxes
-python stream_camera.py --port PORT --resolution 2 --scale 2
-```
-
-| Key | Action |
-|-----|--------|
-| `q` / `Esc` | quit |
-| `s` | save a PNG into `snapshots/` |
-| `d` | toggle the box + HUD overlay |
-
-`--detect` needs the model from Test 1. `--info` reads the model's own
-metadata, so it can tell you exactly what is loaded:
+Confirm with `python stream_camera.py --info`, which reads the model's own
+metadata:
 
 ```
 Model: Face Detection  (id 60094, task detect)
   classes: face
   confidence threshold 60%, IoU 45%
-  checksum: 377aee70190387cc4cf2435f13aab3af
 ```
 
-Those class names are picked up automatically, so **you do not need a labels
-file** — `--labels` is only for overriding them.
+Class names come from there automatically — no labels file needed.
 
-> **Do not trust `AT+MODELS?` for this.** It reports `size: 0` whether or not a
-> model is flashed, on every board tested. The only reliable source is the
-> base64 metadata blob in `AT+INFO?`, which is what these tools read.
-
-### Resolution and throughput
-
-`--info` lists what the sensor offers. Measured on a real board:
-
-| `--resolution` | Frame size | Throughput |
-|----------------|------------|------------|
-| `0` (default)  | 240×240    | ~12 fps |
-| `1`            | 480×480    | — |
-| `2`            | 640×480    | ~7 fps |
-
-The serial link is the bottleneck, not the sensor — every frame crosses as
-base64-encoded JPEG. This matters for stereo: two cameras share your USB bus,
-and higher resolution means slower frames and worse synchronisation.
+> `AT+MODELS?` reports `size: 0` whether or not a model is flashed. The only
+> reliable source is the base64 metadata in `AT+INFO?`, which is what these
+> tools read.
 
 ---
 
-## Test 3 — Night mode
+## Step 2 — Check the cameras
 
-The whole point of these IR modules is seeing in the dark. This checks that
-they do.
+Confirm both boards produce frames, then move on.
 
-```
-python camera_info.py --night --port PORT
-```
-
-Turn the lights off when prompted. The tool grabs a dozen frames and reports
-mean brightness and contrast:
-
-| Result | Meaning |
-|--------|---------|
-| **usable image in darkness** | Night mode works. |
-| **black** | IR LEDs are not powered, **or** this camera has an IR-cut filter and physically cannot see IR — see the table below. |
-| **lit but flat** | LEDs work but nothing is in range. Put an object 0.3–1 m away and retry. |
-
-The IR LEDs are invisible to you but a phone camera will show them glowing
-faintly purple — a quick way to tell "not powered" from "not detected".
-
-> A **plain Raspberry Pi camera will fail this test by design.** Its IR-cut
-> filter blocks exactly the wavelength the LEDs emit. You need a **NoIR** or a
-> dedicated IR module. Run `python camera_info.py --list` and check the `IR`
-> column.
-
-### Watching it live
-
-The pass/fail check is the quick version. To actually *look* at what the
-sensor sees in the dark:
-
-```
-python night_vision.py --port PORT
-python night_vision.py --port PORT --detect --scale 1.4
+```bash
+python stream_camera.py --port PORT                # is there a picture?
+python camera_info.py --mode --port A --port B     # do both agree on day/night?
 ```
 
-![Six-panel IR night-vision view](../assets/images/night_vision_grid.png)
+**Focus is mechanical.** No AT command exists. Turn the M12 lens barrel while
+streaming. The 1.7 mm fisheye is fiddly — a small turn moves it from sharp to
+useless.
 
-*(Captured from a real board in a dark room. The two "face" boxes are false
-positives on bright IR reflections — worth seeing, because it is exactly what
-a detector does when the only high-contrast things in frame are your own
-illuminators bouncing back.)*
+**Day/night switching is also mechanical.** The IR-cut filter and the
+illuminators are driven by a light sensor on the camera module itself; the
+Vision AI V2 can neither read nor control them. Probing the firmware returns
+`Unknown command` for every one of `AT+FOCUS?`, `AT+EXPOSURE?`, `AT+GAIN?`,
+`AT+AEC?`, `AT+AWB?`, `AT+ICR?`, `AT+IRCUT?`, `AT+LED?`, `AT+NIGHT?`. To force
+a mode, light or shade the small photo-sensor between the IR LEDs.
 
-Six views of the same frame, live:
-
-| Panel | Shows |
-|-------|-------|
-| **1 RAW IR** | Exactly what the sensor sends. |
-| **2 ENHANCED** | CLAHE — equalises locally, so shadow detail survives next to a bright hotspot. This is where you see whether detail is *recoverable*. |
-| **3 FALSE COLOUR** | Intensity through a heat-style palette. Press `p` to cycle INFERNO / JET / TURBO / HOT / MAGMA / OCEAN. |
-| **4 NIGHT VISION** | The green-phosphor look, with gamma lift, grain and vignette. |
-| **5 IR SPREAD** | The scene blurred away to leave the illumination pattern — where your LEDs actually throw light. White outlines mark blown-out pixels, dark outlines mark dead ones. |
-| **6 ANALYSIS** | Live histogram, exposure readings, a brightness trend, and a verdict. |
-
-| Key | Action |
-|-----|--------|
-| `q` / `Esc` | quit |
-| `s` | save the whole grid as a PNG |
-| `r` | start/stop recording to `night_vision.avi` (`--record` sets the name) |
-| `p` | cycle the false-colour palette |
-| `1`–`6` | blow up a single panel |
-| `0` | back to the grid |
-
-> ### These are not thermal cameras
->
-> This matters for interpreting panel 3. An IR module on a Grove Vision AI V2
-> sees **near-infrared light reflected off things**, the same way a normal
-> camera sees visible light — the IR LEDs are just a torch you cannot see. It
-> measures **brightness, never temperature**.
->
-> So in the heat palette, a cold white wall lit by the LEDs reads "hot", and a
-> warm dark jumper reads "cold". It is a way of reading brightness, not a
-> thermal image. For real temperature you need a thermal sensor such as an
-> MLX90640 — a different device entirely.
-
-**Reading panel 5 is the useful trick.** IR LEDs fall off sharply with
-distance, and they are aimed. If the bright region sits in a corner rather
-than where your subject is, angle the illuminators — that costs nothing and
-buys more usable range than any amount of image processing.
-
-![Face detection at night on both cameras](../assets/images/both_with_face_detection_night_2mb.gif)
-
-*Both boards running Face Detection in a dark room — the fisheye (left) taking
-in the whole scene, the 3.6 mm (right) filling the frame with one face.*
-
-### Day/night switching — and why there is no command for it
+`--mode` infers the state by measuring colour: with the IR-cut filter removed,
+infrared floods all three channels equally and a lit room comes back
+colourless.
 
 ```
-python camera_info.py --mode --port PORT_A --port PORT_B
-```
-
-**You cannot switch this in software.** Probing the firmware for every
-plausible control returns `Unknown command` for all of them:
-
-```
-AT+FOCUS?  AT+AF?  AT+EXPOSURE?  AT+GAIN?  AT+AGC?  AT+AEC?
-AT+BRIGHTNESS?  AT+CONTRAST?  AT+AWB?  AT+ICR?  AT+IRCUT?
-AT+LED?  AT+NIGHT?  AT+SHUTTER?  AT+VFLIP?  ...   -> all UNSUPPORTED
-```
-
-The only sensor command the firmware implements is `AT+SENSOR=<id>,<on>,<opt>`,
-which picks the resolution. Everything else — exposure, gain, white balance,
-the IR-cut filter and the illuminators — is handled on the **camera module
-itself**, by its own light sensor, and the Vision AI V2 can neither read nor
-control it.
-
-`--mode` measures the effect instead of asking. An IR-cut filter blocks
-infrared; remove it and IR floods red, green and blue about equally, so even a
-lit room comes back nearly colourless:
-
-```
-COM4: saturation   2.4%  channel spread  2.0  -> NIGHT (IR-cut removed)
-COM3: saturation  11.5%  channel spread  3.4  -> DAY (IR-cut in place)
-
+COM4: saturation   2.4%  ->  NIGHT (IR-cut removed)
+COM3: saturation  11.5%  ->  DAY (IR-cut in place)
 MISMATCH: these cameras are in different modes.
 ```
 
-That is a real measurement from this rig, and it explains the "why is one feed
-dark in a lit room?" symptom: that camera is still in night mode, so its
-auto-exposure is fighting the IR illuminators rather than the room light.
+**Get both into the same mode before calibrating.** One eye seeing infrared
+while the other does not makes the same scene look different to each.
 
-**To force a mode**, light or shade the small photo-sensor on the camera module
-(the little dome between the IR LEDs) — brighten it for day, cover it for
-night. Nothing else will do it.
+### Optional: night-vision tests
 
-**For stereo, check both cameras report the same mode before calibrating.**
-One eye seeing infrared while the other does not makes the same scene look
-genuinely different to each, and matching between them gets harder.
+Not needed for stereo. Useful to confirm the IR illumination works, and good
+for showing the rig off.
 
-### Focus
-
-Also mechanical, also no command. These are M12 screw-mount lenses: **turn the
-lens barrel** in its holder to focus. The reliable way is to stream the feed
-and adjust while watching:
-
-```
-python stream_camera.py --port PORT
+```bash
+python camera_info.py --night --port PORT    # pass/fail in darkness
+python night_vision.py --port PORT           # six live views
 ```
 
-The 1.7 mm fisheye is the fiddly one — its depth of field is enormous once set,
-but the correct position is a narrow band, so a small turn moves you from sharp
-to useless.
+![Face detection at night on both cameras](../assets/images/both_with_face_detection_night_2mb.gif)
 
-Sample numbers from a real run in a dark room: mean brightness **72.5/255**,
-contrast **54.6**, dynamic range **221**, nothing dead, ~5% blown out —
-*EXCELLENT, strong detail in darkness*.
+![Six-panel IR night-vision view](../assets/images/night_vision_grid.png)
+
+Panels: **RAW**, **ENHANCED** (CLAHE, pulls detail out of shadow), **FALSE
+COLOUR** (`p` cycles palettes), **NIGHT VISION** (green phosphor), **IR
+SPREAD** (where the illuminators actually throw light — angle them if the
+bright patch is not on your subject), **ANALYSIS** (histogram, exposure,
+verdict).
+
+> **These are not thermal cameras.** They see near-infrared *reflected off
+> things* — the IR LEDs are a torch you cannot see. Brightness, never
+> temperature. In the heat palette a cold white wall reads "hot". For real
+> temperature you need a thermal sensor such as an MLX90640.
+
+A plain Raspberry Pi camera fails the night test by design: its IR-cut filter
+blocks exactly the wavelength the LEDs emit.
 
 ---
 
-## Test 4 — Camera properties
+## Step 3 — Measure your lenses
 
-Stereo depth needs a focal length **in pixels**. That comes from the lens and
-the sensor:
+Stereo depth needs focal length **in pixels**:
 
 ```
 f_px = focal_length_mm × image_width_px ÷ sensor_width_mm
 ```
 
+The datasheet value is **nominal**. It assumes the board maps the full sensor
+width onto the image, and the Vision AI V2 crops and scales before you see a
+frame. If it crops, the true focal length is larger and every distance is wrong
+by the same ratio.
+
+```bash
+python camera_info.py --measure
 ```
-python camera_info.py --list              # every known camera
-python camera_info.py --show ir-3.6mm     # one in detail
-python camera_info.py --add               # describe a camera you own
-python camera_info.py --measure           # measure it for real
-```
+
+Show the camera something of known width (A4 is 0.297 m) at a measured
+distance, note its pixel width, and the tool solves
+`f_px = pixels × distance ÷ width`. No datasheet involved. Give the answer to
+`calibrate_stereo.py` when it asks.
 
 ### The cameras
 
 | | Camera | Key | Sensor | Focal | HFOV (computed) | Vendor claim | Sees IR | IR LEDs |
 |---|---|---|---|---|---|---|---|---|
-| <img src="../assets/images/IR3_6mm.jpg" width="190"> | **IR 3.6 mm 1080P** | `ir-3.6mm` | OV5647, 1/4″ (3.67×2.74 mm) | 3.6 mm | **54.0°** | 72° | ✅ | ✅ |
-| <img src="../assets/images/IR1_7mm.jpg" width="190"> | **IR 1.7 mm 5MP 1/2.5″ fisheye** | `ir-1.7mm` | OV5647, 1/4″ (3.67×2.74 mm) | 1.7 mm | **94.4°** | 150° | ✅ | ✅ |
-| <img src="../assets/images/rpicam.jpg" width="190"> | **Raspberry Pi Camera v1.3** | `rpi-v1` | OV5647, 1/4″ (3.67×2.74 mm) | 3.6 mm | **54.0°** | 53.5° | ❌ | ❌ |
+| <img src="../assets/images/IR3_6mm.jpg" width="170"> | **IR 3.6 mm 1080P** | `ir-3.6mm` | OV5647, 1/4″ | 3.6 mm | **54.0°** | 72° | ✅ | ✅ |
+| <img src="../assets/images/IR1_7mm.jpg" width="170"> | **IR 1.7 mm fisheye** | `ir-1.7mm` | OV5647, 1/4″ | 1.7 mm | **94.4°** | 150° | ✅ | ✅ |
+| <img src="../assets/images/rpicam.jpg" width="170"> | **Raspberry Pi Camera v1.3** | `rpi-v1` | OV5647, 1/4″ | 3.6 mm | **54.0°** | 53.5° | ❌ | ❌ |
 
-Also in the database, for people who own them: `rpi-v1-noir`, `rpi-v2`,
-`rpi-v2-noir`, `rpi-v3`.
+Also available: `rpi-v1-noir`, `rpi-v2`, `rpi-v2-noir`, `rpi-v3`. Add your own
+with `camera_info.py --add`.
 
-**Which to use for stereo:** the **3.6 mm**, and ideally *two of them*. It is
-much closer to a pinhole camera, which is the model every depth formula here
-assumes. The 1.7 mm sees a far wider scene but bows straight lines badly, and
-that distortion turns directly into depth error away from the image centre.
-
-### Mixing two different lenses
-
-![The same scene through both lenses](../assets/images/fov_compare.png)
-
-*Same room, same moment, two cameras side by side. The chair fills the 3.6 mm
-frame and sits small and central in the fisheye — that is the whole difference
-between 54° and 94°, not a focus or distance problem.*
-
-A mixed rig **works**, but costs you real accuracy. Two things happen:
-
-**1. Matching breaks unless it is done in angular units.** The same object is
-2.12× taller in the 3.6 mm frame — a 4.5× area ratio — which any sensible
-size test rejects as "not the same object". So detections are normalised by
-each camera's own focal length before matching, which removes the lens from the
-comparison. Pass `config=` to `match_detections`, as `stereo_vision.py` does.
-
-**2. Depth precision drops to the level of the worse camera.** Measured, at
-1.5 m, for one pixel of error on the right eye:
-
-| Rig | Focal (px) | 1 px of disparity = |
-|-----|-----------|---------------------|
-| Two 3.6 mm | 235 / 235 | **131 mm** |
-| Two 1.7 mm | 111 / 111 | 308 mm |
-| **3.6 mm + 1.7 mm (mixed)** | 235 / 111 | **308 mm** |
-
-The mixed rig is exactly as imprecise as two fisheyes. The wide lens spreads
-the same scene over fewer pixels, so each pixel covers more angle, and depth
-error follows the *worse* of the two — the sharp camera buys you nothing.
-
-A matching pair of 3.6 mm modules would be better, but a mixed rig is
-perfectly workable — it just needs the software to pull its weight.
-
-### Making a mixed rig work
-
-Three changes, in order of what they buy. All measured on this rig.
-
-**1. Run both cameras at 640×480** (`--resolution 2`). The fisheye's focal
-length goes from 111 px to 296 px, and depth error scales as 1/f:
-
-| Resolution | Fisheye focal | 1 px of error at 1.5 m |
-|-----------|---------------|------------------------|
-| 240×240 | 111 px | 308 mm |
-| **640×480** | **296 px** | **103 mm** |
-
-Costs frame rate: 13.7 fps drops to 6.1. Calibrate at the resolution you will
-actually run, because the focal lengths in the config depend on it.
-
-**2. Let the code match image content, not bounding boxes** (on by default).
-Detection boxes wobble by a few pixels between frames, and on a short baseline
-that wobble dominates every other error. So instead of trusting the box, the
-left patch is rescaled to the right camera's angular scale, correlated against
-the right image, and the correlation peak fitted with a parabola for a
-fractional-pixel position.
-
-Benchmarked over 160 random depths from 0.7–3.2 m, against box centres:
-
-| Box jitter | Box centres (RMS) | Sub-pixel (RMS) | Gain |
-|-----------|-------------------|-----------------|------|
-| 0 px (unrealistic) | 61 mm | 82 mm | 0.75× |
-| 1 px | 317 mm | **82 mm** | **3.9×** |
-| 2 px | 637 mm | **82 mm** | **7.8×** |
-| 3 px | 997 mm | **82 mm** | **12.1×** |
-
-The refined error does not move. That is the point: it locks onto the picture,
-so it does not care how the box jitters. With perfect boxes it is slightly
-worse than using them directly — the rescaling costs a little accuracy — but
-perfect boxes do not exist.
-
-It refuses rather than guesses when there is nothing to lock onto: a patch with
-too little texture, or a correlation score below 0.35, falls back to the box
-centre and the readout drops the `sub-px` tag.
-
-**3. Widen the baseline if the mount allows.** Depth error scales as 1/B, so
-79 mm → 150 mm is very nearly a 2× improvement, for free. Re-measure and
-re-run `calibrate_stereo.py` after moving anything.
-
-Together, at 1.5 m: **308 mm → about 24 mm**, and a 5-frame median filter
-(`--smooth`) damps what is left.
-
-### What code cannot fix
-
-- **Overlap.** Only the middle ~54° of the fisheye's 94° view is shared with
-  the 3.6 mm camera. Outside it there is nothing to triangulate, and the HUD
-  will say so. Aim both cameras at the same place.
-- **Fisheye distortion.** Away from the image centre the pinhole model breaks
-  down and depth drifts. Keep the target reasonably central, or run a
-  checkerboard calibration and fill in the distortion coefficients.
-- **Synchronisation.** Bigger frames arrive slower, so 640×480 pushes skew from
-  ~47 ms to ~72 ms. `calibrate_stereo.py` now sets the tolerance from the
-  resolution automatically (170 ms at 640×480); with the old fixed 60 ms every
-  pair would have been rejected. Keep motion slow.
-
-**On the vendor numbers.** The gap in the fisheye row is real, not a typo. The
-`1/2.5″` on that lens is the *image circle it can cover*, not the sensor fitted
-behind it. On a 1/4″ OV5647 only the middle of that circle is used, so you get
-about 94°, not 150°. Computed values come from sensor size and focal length;
-vendor figures are usually the lens's diagonal coverage on a larger sensor.
-
-### Describing a camera we do not know
-
-```
-python camera_info.py --add
-```
-
-It asks for sensor format (with the real millimetre sizes behind the
-nicknames), native resolution, focal length and whether the module sees IR,
-then writes `custom_cameras.yaml`. Every other tool picks it up automatically,
-so `--camera my-6mm` works everywhere afterwards.
-
-### Measuring focal length — do this before you trust any distance
-
-Every number in that table is **nominal**. It assumes the board maps the full
-sensor width onto the output image, and the Grove Vision AI V2 crops and scales
-to 240×240 before you ever see a frame. If it crops rather than scales, the
-true focal length is larger — and every distance you measure is wrong by the
-same ratio.
-
-```
-python camera_info.py --measure
-```
-
-Show the camera something of known width (a sheet of A4 is 0.297 m) at a
-measured distance, note how many pixels wide it lands, and the tool solves
-`f_px = pixels × distance ÷ width`. No datasheet involved, and it absorbs
-whatever the board does internally. Feed the result to `calibrate_stereo.py`
-when it asks.
+The fisheye's vendor gap is real: `1/2.5″` is the lens's *image circle*, not
+the sensor behind it. On a 1/4″ OV5647 only the middle is used — about 94°, not
+150°.
 
 ---
 
-## Test 5 — Stereo calibration
+## Step 4 — Calibrate the rig
 
-```
+```bash
 python calibrate_stereo.py
 ```
 
-Interactive: it finds both boards, asks which is the left eye, which camera is
-on each side, and takes two measurements from you.
-
 ![Measuring the stereo rig](../assets/images/stero_vision_setup.jpg)
 
-**Baseline** — the distance between the two **lens centres**, as in the photo
-above. Measure the lenses, not the boards. A caliper is ideal, a ruler is fine.
-This single number sets the entire depth scale: get it 10% wrong and every
-distance you ever measure is 10% wrong.
+It asks for two measurements:
 
-**Convergence** — the total angle between the two optical axes. If both cameras
-point straight ahead, this is **0** and you can just press Enter. Parallel is
-easier to get right and is what most rigs use; a guessed angle is worse than an
-honest zero. If you have toed them in, measure it with a protractor.
+**Baseline** — distance between the two **lens centres**, as in the photo.
+Measure the lenses, not the boards. This sets the entire depth scale: 10% out
+means every distance is 10% out.
 
-It writes three files:
+**Convergence** — the angle between the optical axes. Both pointing straight
+ahead is **0**; just press Enter. A guessed angle is worse than an honest zero.
+
+It writes:
 
 | File | Purpose |
 |------|---------|
-| `stereo_config.yaml` | The rig, in ROS 2 parameter layout. `stereo_vision.py` reads this. |
-| `left.yaml` | `sensor_msgs/CameraInfo` for the left camera. |
-| `right.yaml` | Ditto for the right, with the baseline encoded as `Tx = -fx × B`. |
+| `stereo_config.yaml` | The rig, in ROS 2 parameter layout. `stereo_vision.py` reads it. |
+| `left.yaml` / `right.yaml` | `sensor_msgs/CameraInfo`, with the baseline as `Tx = -fx × B`. |
 
-The last two are the layout `camera_info_manager` expects, so the stock ROS 2
-image pipeline (`stereo_image_proc` and friends) can consume the same rig:
+So the stock ROS 2 pipeline can use the same rig:
 
 ```bash
 ros2 run <your_pkg> <your_node> --ros-args --params-file stereo_config.yaml
 ```
 
-Non-interactive, if you already know the numbers:
-
-```
-python calibrate_stereo.py --left PORT --right PORT --baseline 0.079
-```
-
-### What the geometry buys you
-
-The tool prints the usable range for your rig. For a 79 mm baseline at 240×240
-with a 3.6 mm lens:
-
-- **usable range** ≈ 0.08 m to 18 m
-- **at 1 m**, one pixel of disparity is worth **51 mm** of depth
-- **at 1.5 m**, one pixel is worth **112 mm**
-
-Depth error grows with the **square** of distance — double the range, quadruple
-the error. And because the model reports bounding boxes as whole pixels,
-disparity is quantised: those per-pixel figures are your real precision floor,
-not a rounding detail. A wider baseline or a higher resolution pushes it out.
+**Calibrate at the resolution you will run at.** The focal lengths in the
+config depend on it, and `stereo_vision.py` drives the sensors to match.
 
 ---
 
-## Test 6 — Stereo vision
+## Step 5 — Run stereo
 
-```
+```bash
 python stereo_vision.py --config stereo_config.yaml
 ```
 
-Three panels in one window — left eye and right eye on top, and the combined
-view below, stretched wide because it carries the number that matters.
-
 ![The three-panel stereo layout](../assets/images/stereo_layout_example.png)
 
-*(Rendered from synthetic frames constructed for a known 1.5 m distance, to
-show the layout and verify the maths — not a photograph of a real scene.)*
+*(Rendered from synthetic frames at a known 1.5 m, to show the layout.)*
 
-- **LEFT / RIGHT** — each camera with its own detections. The distance shown is
-  a *monocular guess*: one camera cannot measure depth, so it works backwards
-  from an assumed real-world object size. It is a sanity check, not a
-  measurement.
-- **Combined** — the two frames overlaid as a red/cyan anaglyph, so you can
-  *see* the disparity as colour fringing: wide fringes mean close, no fringe
-  means far away. Matched objects get the **triangulated stereo distance**,
-  which is the real one.
+- **LEFT / RIGHT** — each camera's detections. The distance is a *monocular
+  guess* from an assumed object size; a sanity check, not a measurement.
+- **Combined** — both frames as a red/cyan anaglyph, so disparity is visible as
+  colour fringing. Wide fringes mean close. This panel carries the real
+  **triangulated** distance.
 
-| Key | Action |
+Distances tagged `sub-px` were refined by image matching. Ones without fell
+back to the box centre and are far noisier.
+
+### Getting a believable number
+
+1. Same model on both boards.
+2. The object must be visible to **both** cameras.
+3. Keep it near the image **centre**, especially with the fisheye.
+4. Use a **measured** focal length, not the nominal one.
+5. Check against a tape measure. If everything is off by a constant ratio, the
+   baseline or focal length is wrong.
+
+---
+
+## Running a mixed-lens rig
+
+A 3.6 mm and a 1.7 mm together works, but two things need care.
+
+![The same scene through both lenses](../assets/images/fov_compare.png)
+
+*Same room, same moment. The chair fills the 3.6 mm frame and sits small in the
+fisheye — that is 54° versus 94°, not a focus or distance problem.*
+
+**Matching happens in angular units.** The same object is 2.12× taller through
+the 3.6 mm lens — a 4.5× area ratio, which any size test rejects as "not the
+same object". Detections are normalised by each camera's own focal length
+first, which removes the lens from the comparison.
+
+**Depth is matched on image content, not bounding boxes.** Detection boxes
+wobble a few pixels every frame, and on a short baseline that wobble dominates
+everything else. The left patch is rescaled to the right camera's angular
+scale, correlated against the right image, and the peak fitted for a
+fractional-pixel position. Benchmarked at 240×240 over 160 random depths from
+0.7–3.2 m:
+
+| Box jitter | Box centres | Sub-pixel | Gain |
+|-----------|-------------|-----------|------|
+| 0 px (unrealistic) | 96 mm | 110 mm | 0.9× |
+| **1 px** | 627 mm | **110 mm** | **5.7×** |
+| **2 px** | 942 mm | **110 mm** | **8.5×** |
+| 3 px | 1157 mm | 111 mm | 10.5× |
+
+The refined column does not move — it locks onto the picture and ignores the
+box. It costs **1.9 ms per detection, about 2.6% of a frame**, so it stays on
+by default. With a textureless patch or a correlation below 0.35 it refuses and
+falls back to the box centre, dropping the `sub-px` tag.
+
+### Precision, and the resolution trade
+
+Depth error scales as `Z² / (f × B)` — it grows with the *square* of distance,
+and shrinks with focal length and baseline. At 1.5 m, per pixel of error:
+
+| Rig | 1 px = |
 |-----|--------|
-| `q` / `Esc` | quit |
-| `s` | save the whole composed view |
-| `d` | toggle overlays |
-| `a` | anaglyph ⇄ plain blend |
+| Two 3.6 mm, 240×240 | 131 mm |
+| **3.6 mm + fisheye, 240×240 (default)** | **308 mm** |
+| 3.6 mm + fisheye, 640×480 | 103 mm |
 
-Before streaming, both boards are asked what model they are running and the
-metadata **checksums are compared**. Different models on the two eyes is a hard
-error, because detections cannot be matched between eyes that disagree about
-what they are looking at.
+A mixed rig inherits the *worse* camera's precision — the sharp one buys you
+nothing.
 
-Distances marked `sub-px` were refined by image matching; ones without fell
-back to the bounding-box centre and are much noisier. `--no-refine` turns
-refinement off for comparison, and `--smooth N` sets the median filter width
-(default 5, `1` disables).
+**640×480 is 3× more precise but halves the frame rate** (13.7 fps → 6.1) and
+pushes sync skew from ~47 ms to ~72 ms. **240×240 is the default**, because
+frame rate matters more for a moving robot. Switch with
+`calibrate_stereo.py --width 640 --height 480` only if you need the precision
+and can accept the slowdown.
 
-`--no-detect` streams both feeds with no model and no depth, which is a useful
-way to check the two cameras are both alive and roughly aligned before you
-worry about detections.
+**Widening the baseline is the free win**: error scales as 1/B, so 79 mm →
+150 mm nearly halves it at no cost in speed.
 
-### Synchronisation — read this before trusting a number
+### What no amount of code fixes
 
-These are two independent boards on two USB serial links. **There is no
-hardware trigger.** Frames cannot be captured simultaneously, only *paired
-after the fact* by arrival time. Every frame is timestamped as it arrives, and
-each left frame is matched to the nearest right frame; pairs further apart than
-`max_sync_skew_ms` (default 60 ms) are thrown away.
-
-**Measured on two real boards** at 240×240 (~14.7 pairs/s): skew sat at
-**46–48 ms with almost no spread** — median and maximum within 1 ms of each
-other. That flatness is the important part. It is not jitter that smarter
-pairing could average away; it is a near-constant phase offset between the two
-capture loops, about half a frame period. Searching more frames back for a
-tighter match bought only ~1.6 ms, and searching too far made it worse.
-
-So treat **half a frame period as the floor**. The HUD shows live skew and
-warns as it approaches the limit. This is fine for a slow-moving robot; it is
-not fine for anything fast, because the object genuinely did move during those
-48 ms, so the disparity — and the distance — comes out wrong.
-
-Faster frames (lower resolution) shrink the offset. Only a hardware trigger
-removes it.
-
-### Getting a believable distance
-
-1. Both boards need the **same model** (Test 1).
-2. The object must be visible to **both** cameras — outside the overlap there
-   is nothing to triangulate, and the HUD will say so.
-3. Keep it near the **centre** of the image, especially with the fisheye, where
-   the pinhole model holds worst at the edges.
-4. Use a **measured** focal length (Test 4), not the nominal one.
-5. Sanity-check against a tape measure at a known distance. If everything is
-   off by a constant ratio, your baseline or focal length is wrong; that is the
-   first thing to re-measure.
+- **Overlap** — only the middle ~54° of the fisheye is shared. Aim both
+  cameras at the same place.
+- **Fisheye distortion** — the pinhole model breaks down away from centre.
+  Keep the target central, or run a checkerboard calibration.
+- **Synchronisation** — no hardware trigger exists. Frames are paired by
+  arrival time, and skew sits at ~47 ms with almost no spread: a near-constant
+  phase offset of about half a frame period, not jitter. Fine for a slow robot;
+  wrong for anything fast.
 
 ---
 
 ## How it works
 
-| Command | Purpose |
-|---------|---------|
-| `AT+SAMPLE=-1` | stream frames continuously, **no model** — the plain camera feed |
-| `AT+INVOKE=-1,0,0` | stream frames **with** inference; `0,0` = include the JPEG, report every frame |
-| `AT+BREAK` | stop streaming (sent on startup and on exit) |
-| `AT+SENSORS?` | cameras the firmware can see, and their resolutions |
-| `AT+MODELS?` | model slots; `size: 0` means nothing is loaded |
-| `AT+ID?` / `AT+NAME?` / `AT+VER?` | identity |
+| AT command | Purpose |
+|------------|---------|
+| `AT+SAMPLE=-1` | Stream frames, no model — the plain camera feed. |
+| `AT+INVOKE=-1,0,0` | Stream frames with inference; include the JPEG, report every frame. |
+| `AT+BREAK` | Stop streaming. |
+| `AT+SENSORS?` / `AT+SENSOR=` | Cameras and resolutions. The only sensor control there is. |
+| `AT+INFO?` | Base64 model metadata — name, classes, checksum. |
+| `AT+ID?` / `AT+NAME?` / `AT+VER?` | Identity. |
 
-Replies are one JSON object per line, wrapped in `\r` … `\n`:
+Replies are one JSON object per line wrapped in `\r` … `\n`; `type` is `0` for
+a response, `1` for a streamed event, `2` for a log line. Base64 never contains
+a newline, so splitting on `\n` is enough framing.
 
-```json
-{"type": 1, "name": "SAMPLE", "code": 0,
- "data": {"count": 12, "image": "<base64 jpeg>"}}
-```
-
-`type` is `0` for a response to a command, `1` for a streamed event, `2` for a
-log line (including `Unknown command`). Base64 never contains a newline, so
-splitting the byte stream on `\n` is enough framing — no brace-matching across
-a 60 kB payload.
-
-Depth uses **ray intersection**, not `Z = f·B/d`. The textbook formula assumes
-perfectly parallel cameras; intersecting the two viewing rays in 3D handles a
-toed-in rig as well, and gives the identical answer when the rig is parallel.
+Depth uses **ray intersection**, not `Z = f·B/d` — the textbook formula assumes
+parallel cameras, whereas intersecting the two viewing rays handles a toed-in
+rig too and agrees exactly when parallel.
 
 ```
 test_camera/
 ├── stream_camera.py     # single camera feed
-├── camera_info.py       # camera properties, custom cameras, focal measurement, night test
-├── night_vision.py      # six-panel live IR viewer with recording
+├── camera_info.py       # lens properties, focal measurement, night + mode checks
 ├── calibrate_stereo.py  # measure the rig -> ROS 2 config
 ├── stereo_vision.py     # three-panel live stereo
-├── diagnose.py          # which firmware is a board actually running?
+├── night_vision.py      # six-panel IR viewer (demo)
+├── diagnose.py          # which firmware is a board running?
 ├── flash_firmware.py    # reflash over the bootloader's X-Modem receiver
 └── sscma/
-    ├── protocol.py      # framing + JSON reply parsing, no I/O
+    ├── protocol.py      # framing + JSON parsing, no I/O
     ├── client.py        # serial transport, AT commands, frame decoding
-    ├── cameras.py       # lens/sensor properties and the optics that follow
+    ├── cameras.py       # lens/sensor properties and optics
     ├── config.py        # rig config, ROS 2 readable
-    ├── stereo.py        # synchronised capture + triangulation
+    ├── stereo.py        # sync capture, matching, triangulation
     └── viewer.py        # OpenCV presentation
 ```
 
-`sscma/` imports OpenCV lazily, so the protocol, optics and stereo maths carry
-no GUI dependency. A ROS 2 node can reuse `client.py`, `cameras.py`,
-`config.py` and `stereo.py` directly and publish `sensor_msgs/Image` instead of
-calling `imshow` — which is the whole point of building it this way.
+`sscma/` imports OpenCV lazily, so protocol, optics and stereo maths carry no
+GUI dependency — a ROS 2 node can reuse them and publish `sensor_msgs/Image`
+instead of calling `imshow`.
 
 ---
 
@@ -699,134 +463,76 @@ calling `imshow` — which is the whole point of building it this way.
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| "No serial ports found" | Charge-only USB-C cable — very common. Swap for a data cable. |
-| Access denied / permission error | **Windows/macOS:** another program holds the port — a SenseCraft tab in Chrome keeps it open even when it fails to connect. **Linux:** add yourself to `dialout` and log back in. |
-| Port opens but no frames | Run `python diagnose.py PORT` — usually the wrong firmware, not the camera. |
-| "did not answer AT+NAME?" | Not running sscma-micro. See [Recovering a board](#recovering-a-board-that-never-sees-a-camera). |
-| "could not read model metadata" | The board did not answer `AT+INFO?`. The tools warn and try anyway — `AT+INVOKE` is the real authority. |
-| "The two boards are running different models" | Flash the same model on both from SenseCraft; the eyes cannot be matched otherwise. |
-| Night test says "black" | IR LEDs unpowered, or the camera has an IR-cut filter (check `camera_info.py --list`). |
-| Feed is dark in a lit room | The module is still in night mode. Confirm with `camera_info.py --mode`; light the photo-sensor between the IR LEDs to force day mode. No AT command can switch it. |
-| Image is blurry at every distance | Focus is mechanical — turn the M12 lens barrel while streaming. |
-| Two eyes never match, mixed lenses | `match_detections` needs `config=` to compare in angular units; `stereo_vision.py` passes it. |
-| Boxes offset down-and-right | Firmware reports corner-origin boxes: add `--box-format corner`. The default (`center`) is confirmed correct on firmware `2025.01.02`. |
-| "no object matched in both eyes" | The object is outside the overlap, or only one board has the model. |
-| Stereo distances all wrong by the same ratio | Baseline or focal length is off. Re-measure the baseline; run `camera_info.py --measure`. |
-| Stereo distances jump around | Poor sync (check the HUD skew), or the object is at the range limit. Check the readout says `sub-px`; if not, the patch has too little texture to match and it is falling back to the jittery box centre. |
-| "No synchronised pair in Ns" at 640x480 | Frames arrive slower, so skew grows. Re-run `calibrate_stereo.py` at that resolution so the tolerance is set correctly. |
+| "No serial ports found" | Charge-only USB-C cable — very common. Use a data cable. |
+| Access denied | Another program holds the port — usually a SenseCraft tab in Chrome. On Linux, add yourself to `dialout`. |
+| That port does not exist | Board unplugged, or it came back on a different port. `--list-ports`. |
+| Port opens but no frames | `python diagnose.py PORT` — usually the wrong firmware, not the camera. |
+| "did not answer AT+NAME?" | Not running sscma-micro. See [Recovering a board](#recovering-a-board). |
+| Feed dark in a lit room | Still in night mode. `camera_info.py --mode`; light the photo-sensor between the IR LEDs. |
+| Blurry at every distance | Focus is mechanical — turn the lens barrel while streaming. |
+| "No model is flashed" | Go back to Step 1. |
+| Boxes offset down-and-right | Add `--box-format corner`. |
+| "no object matched in both eyes" | Object outside the overlap, or only one board has the model. |
+| Distances wrong by a constant ratio | Baseline or focal length. Re-measure; run `camera_info.py --measure`. |
+| Distances jump around | Check the readout says `sub-px`. If not, too little texture to match and it is using the jittery box centre. |
+| "No synchronised pair in Ns" | Re-run `calibrate_stereo.py` at the resolution you are using, so the sync tolerance is set correctly. |
 
 ---
 
-## Recovering a board that never sees a camera
+## Recovering a board
 
-If a board produces no frames **no matter which camera or cable you try**, stop
-swapping hardware — the camera is almost certainly fine. Run:
+If a board produces nothing **no matter which camera or cable you try**, stop
+swapping hardware. Run `python diagnose.py`. The line that matters:
 
-```
-python diagnose.py
-```
-
-This captures the bootloader banner and scans baud rates. The line that matters
-is `slot flash_offset`:
-
-| | Healthy board | Board running the wrong image |
+| | Healthy | Wrong firmware |
 |---|---|---|
 | `slot flash_offset` | `0x00100000` | `0x00000000` |
-| After `jump_addr` | `Build date: …` → `sensor_type: 15` → `{"name": "INIT@STAT?", … "is_ready": 1}` | unreadable at 921600; a console at 115200 answering `Command not found!` |
-| `AT+NAME?` @ 921600 | `{"type": 0, "name": "NAME?", "code": 0, "data": "Grove Vision AI V2"}` | nothing |
+| `AT+NAME?` @ 921600 | `"Grove Vision AI V2"` | nothing |
 
-A board booting slot `0x00000000` is running **Himax factory test firmware**,
-which contains no camera application at all — hence no frames, ever, with any
-camera. The bootloader itself is healthy (it verifies images and jumps), so the
-board is fully recoverable.
+Slot `0x00000000` is **Himax factory test firmware** — no camera application at
+all. The bootloader is fine, so the board is recoverable.
 
-**SenseCraft cannot fix this.** Its connect flow first waits for an SSCMA
-handshake, which is exactly the firmware that is missing, so it just times out
-and reports that it refuses to connect. Reflash over the bootloader instead.
+**SenseCraft cannot fix this**: its connect flow waits for the SSCMA handshake,
+which is the firmware that is missing.
 
-### Reflashing
-
-1. **Free the port.** Close the SenseCraft tab.
-2. **Download the firmware** matching your working board's version from the
+1. Close the SenseCraft tab.
+2. Download the firmware matching your working board from the
    [official releases](https://github.com/Seeed-Studio/sscma-example-we2/releases)
-   — e.g. `grove_vision_ai_v2_20250102.img` for firmware `2025.01.02`. Check
-   which version you want with `python stream_camera.py --info` on a healthy
-   board, so both modules end up identical.
-3. **Dry run first** — enters the bootloader and confirms the X-Modem receiver
-   answers, without writing anything:
+   (e.g. `grove_vision_ai_v2_20250102.img`).
+3. `python flash_firmware.py --image FILE.img --port PORT --dry-run` — expect
+   `Set X-modem flag = Yes` and `receiver is ready`. If not, hold **BOOT** while
+   plugging the cable in.
+4. Same command without `--dry-run`. ~18 s. Do not unplug.
+5. `python diagnose.py PORT` → `HEALTHY`.
 
-   ```
-   python flash_firmware.py --image grove_vision_ai_v2_20250102.img --port PORT --dry-run
-   ```
-
-   Expect `Set X-modem flag = Yes` and `receiver is ready ('C' handshake seen)`.
-   If it cannot get there, hold the **BOOT** button while plugging the USB-C
-   cable in, release it, and try again.
-
-4. **Flash** (same command without `--dry-run`). Roughly 18 s for a 630 kB image
-   at 921600 baud. Do not unplug the board.
-
-5. **Verify:** `python diagnose.py PORT` → expect `HEALTHY`.
-
-`flash_firmware.py` only ever writes the application slot — the bootloader is
-untouched, so an interrupted transfer leaves the board exactly as recoverable
-as it was. Retry it.
+Only the application slot is written; the bootloader is untouched, so a failed
+transfer leaves the board no worse off.
 
 ---
 
 ## Verification status
 
-**Verified on real hardware** — two Grove Vision AI V2 modules on Windows 11
-(`id=a4ea3fe8` and `id=ae83564f`, both firmware `2025.01.02`): identity, sensor
-enumeration, model-slot reporting, resolution switching (240×240 and 640×480),
-and continuous frame decoding. `flash_firmware.py` recovered a board stuck on
-Himax factory firmware end to end.
+**Verified on hardware** — two Grove Vision AI V2 boards on Windows 11
+(firmware `2025.01.02`): identity, sensor enumeration, model metadata and class
+names, resolution switching, continuous decoding, night-mode checks, IR-cut
+state detection, and two-board synchronised capture at 14.7 pairs/s (240×240)
+with matching model checksums. `flash_firmware.py` recovered a board stuck on
+factory firmware end to end. Centre-origin boxes confirmed by rendering both
+interpretations against a real detection.
 
 **Verified by test harness** — protocol framing including byte-at-a-time
-arrival, junk tolerance, JPEG decode, box conversion and clamping, command
-rejection, read timeouts; and for the stereo maths, recovery of known 3D points
-to within 1e-6 m for both parallel and toed-in rigs, disparity agreeing with
-`f·B/Z`, detection matching, config round-trips, and `Tx = -fx·B` in the
-generated `CameraInfo`.
+arrival, JPEG decode, box conversion and clamping, command rejection, timeouts;
+triangulation recovering known 3D points to 1e-6 m for parallel, toed-in and
+mixed-lens rigs; angular matching across different lenses; sub-pixel refinement
+benchmarked against known geometry including its refusal behaviour; config
+round-trips and `Tx = -fx·B`.
 
-**Verified at 640x480 on hardware** — both boards driven to 640x480 from the
-config, 6.2 synchronised pairs/s, measured skew ~72 ms. Sub-pixel refinement
-benchmarked over 160 random depths against known geometry, including its
-refusal behaviour on textureless patches.
+**Not verified**
 
-**Verified with mixed lenses** — angular matching pairs the same object across
-a 3.6 mm and a 1.7 mm camera at 0.8-3.0 m and off-centre, while still refusing
-mismatched rows, classes and sizes; exact-geometry triangulation still recovers
-known points to 1e-6 m. The per-pixel depth figures in the lens table were
-measured the same way.
-
-**Verified in the dark** — `camera_info.py --night` passes on both boards
-(mean 69-107/255, contrast 55-61), and `night_vision.py` renders all six views
-from live frames, with the MJPG recorder confirmed writing video.
-
-**Verified with a model flashed** — with SenseCraft's *Face Detection* on both
-boards: model metadata read and identified, class names adopted automatically,
-`--detect` streaming detections at ~21 ms inference, and the centre-origin box
-format confirmed by rendering both interpretations against a real detection.
-Two-board capture ran at 14.7 synchronised pairs/s with matching model
-checksums.
-
-**Not yet exercised on hardware:**
-
-- **A real stereo distance.** The capture, pairing, matching and checksum
-  checks all run against the two boards, but no object has yet been placed in
-  front of both cameras to produce a triangulated reading. The maths is
-  verified against synthetic frames to 1e-6 m; what remains unproven is the
-  accuracy of a real measurement against a tape measure.
-- **A real triangulated distance against a tape measure.** Capture, pairing,
-  matching, sub-pixel refinement and 640x480 operation all run on the two
-  boards; the accuracy figures come from synthetic scenes with known geometry.
-- **A matched-lens stereo rig.** Everything is verified with one 3.6 mm and
-  one 1.7 mm, which is the harder case; a matching pair should only be
-  better.
-- **Linux and macOS.** Windows only, so far.
-- **Fisheye undistortion.** Not implemented. `distortion_coefficients` in the
-  generated `CameraInfo` are all zero. For the 1.7 mm lens that is a real
-  limitation, not a formality — run a checkerboard calibration
-  (`ros2 run camera_calibration cameracalibrator`) and paste the coefficients in
-  if you need accuracy off-centre.
+- **A real distance against a tape measure.** All the machinery runs on the two
+  boards, but the accuracy figures come from synthetic scenes with known
+  geometry.
+- **Linux and macOS.**
+- **Fisheye undistortion.** Not implemented; `distortion_coefficients` are
+  zero. For the 1.7 mm that is a real limitation off-centre — run
+  `ros2 run camera_calibration cameracalibrator` and paste the coefficients in.
