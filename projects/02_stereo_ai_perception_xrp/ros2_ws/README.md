@@ -20,16 +20,22 @@ camera 2  ──►  /image2            ──►  Foxglove
 
 ---
 
-## Build
+## Prerequisites & Build
 
 On the Pi:
 
 ```bash
-# the serial driver and camera database, shared with the bench tools
-pip install -e ~/ROS--2-Ten-Months-Challenge/test_camera
+# 1. System packages (OpenCV, vision_msgs, foxglove_bridge)
+sudo apt update
+sudo apt install -y python3-opencv ros-$ROS_DISTRO-vision-msgs ros-$ROS_DISTRO-foxglove-bridge
 
-sudo apt install ros-$ROS_DISTRO-vision-msgs ros-$ROS_DISTRO-foxglove-bridge
+# 2. Camera driver and SSCMA library
+pip install -e ~/ROS--2-Ten-Months-Challenge/test_camera --break-system-packages
 
+# 3. USB permissions for serial ports
+sudo chmod 666 /dev/ttyACM*
+
+# 4. Build workspace
 cd ~/ROS--2-Ten-Months-Challenge/projects/02_stereo_ai_perception_xrp/ros2_ws
 colcon build --symlink-install
 source install/setup.bash
@@ -42,15 +48,29 @@ rebuilding.
 
 ## Run
 
+### 1. Start micro-ROS Agent (Motor Control)
+In a dedicated terminal:
 ```bash
-# both cameras + tracker + Foxglove bridge
+source /opt/ros/$ROS_DISTRO/setup.bash
+source ~/microros_ws/install/setup.bash
+ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 -b 115200
+```
+
+### 2. Start Cameras & Foxglove Bridge
+In a second terminal:
+
+```bash
+cd ~/ROS--2-Ten-Months-Challenge/projects/02_stereo_ai_perception_xrp/ros2_ws
+source install/setup.bash
+
+# Single camera + Foxglove bridge (tracker off, /cmd_vel free for manual teleop)
+ros2 launch tracker_launch bringup.launch.py use_camera2:=false use_tracker:=false camera1_port:=/dev/ttyACM1
+
+# Both cameras + AI tracker + Foxglove bridge
 ros2 launch tracker_launch bringup.launch.py
 
-# cameras only - nothing moves, good for checking the feeds
+# Cameras only (nothing moves, good for checking the feeds)
 ros2 launch tracker_launch cameras.launch.py
-
-# one camera + tracker, no second board needed
-ros2 launch tracker_launch follow.launch.py
 ```
 
 **Start with the robot on a stand, or with `enabled:=false`.** That runs the

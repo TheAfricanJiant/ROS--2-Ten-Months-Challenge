@@ -38,6 +38,7 @@ public:
         Wire1.setSCL(IMU_SCL_PIN);
         Wire1.begin();
         Wire1.setClock(400000);        // fast mode, as in imu_test
+        Wire1.setTimeout(25);          // prevent blocking if bus hangs
         delay(100);
 
         uint8_t whoami = 0;
@@ -113,10 +114,13 @@ private:
     static void readRegisters(uint8_t reg, uint8_t *buffer, uint8_t length) {
         Wire1.beginTransmission(IMU_ADDR);
         Wire1.write(reg);
-        Wire1.endTransmission(false);          // repeated start
-        Wire1.requestFrom((uint8_t)IMU_ADDR, length);
-        for (uint8_t i = 0; i < length && Wire1.available(); i++) {
-            buffer[i] = Wire1.read();
+        if (Wire1.endTransmission(false) != 0) {
+            memset(buffer, 0, length);
+            return;
+        }
+        uint8_t received = Wire1.requestFrom((uint8_t)IMU_ADDR, length);
+        for (uint8_t i = 0; i < length; i++) {
+            buffer[i] = (i < received && Wire1.available()) ? Wire1.read() : 0;
         }
     }
 };

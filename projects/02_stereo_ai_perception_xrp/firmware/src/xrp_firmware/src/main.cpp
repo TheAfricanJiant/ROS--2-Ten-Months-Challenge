@@ -452,8 +452,17 @@ void setup() {
 
     /* Ask the agent for the time, so stamps line up with the rest of ROS 2. */
     RCSOFT(rmw_uros_sync_session(1000));
+
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
 }
 
 void loop() {
     rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
+
+    static unsigned long last_blink = 0;
+    if (millis() - last_blink >= 500) {
+        last_blink = millis();
+        digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    }
 }

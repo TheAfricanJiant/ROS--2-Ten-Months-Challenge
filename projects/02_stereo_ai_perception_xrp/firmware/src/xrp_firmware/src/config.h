@@ -17,7 +17,7 @@
 
 /* Set to 0 if the board runs out of RAM. Drops the ROS 2 parameter server,
  * which costs three services, and leaves the topics working. */
-#define USE_PARAMETER_SERVER 1
+#define USE_PARAMETER_SERVER 0
 
 /* --------------------------------------------------------------- motors */
 
